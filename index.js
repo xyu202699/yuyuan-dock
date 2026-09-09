@@ -5,7 +5,7 @@
   }
   var TOP = getTop();
   var DOC = TOP.document;
-  var YCDK_VER = '1.0.3';
+  var YCDK_VER = '1.0.4';
   var YCDK_NAME = '\u828b\u5706\u6536\u7eb3';
 
   function teardown(b) {
@@ -101,7 +101,42 @@
     } catch (e) {}
     return '';
   }
-  function foreignKey(el) { var cls = ''; try { cls = (el.className && el.className.toString) ? el.className.toString().slice(0, 30) : ''; } catch (e) {} return 'foreign:' + (el.id || '') + '|' + cls; }
+  var foreignIds = new WeakMap(), foreignSequence = 0;
+  function foreignKey(el) {
+    if (el.id) return 'foreign:' + el.id;
+    if (!foreignIds.has(el)) foreignIds.set(el, 'foreign:anonymous:' + (++foreignSequence));
+    return foreignIds.get(el);
+  }
+  function ballElement(ball) {
+    if (ball.el && ball.el.isConnected) return ball.el;
+    var current = (ball.selector ? DOC.querySelector(ball.selector) : null) || DOC.getElementById(ball.id);
+    return current || null;
+  }
+  function sameBall(ball, el) {
+    var current = ballElement(ball);
+    return !!(current && el && (current === el || current.contains(el) || el.contains(current)));
+  }
+  function registeredBall(el) {
+    var match = null;
+    for (var id in balls) {
+      var ball = balls[id];
+      if (!sameBall(ball, el)) continue;
+      if (ball.type === 'native') return ball;
+      if (!match || ball.el === el) match = ball;
+    }
+    return match;
+  }
+  function mergeBalls(primary, el) {
+    var docked = !!state.docked[primary.id];
+    Object.keys(balls).forEach(function (id) {
+      var other = balls[id];
+      if (other === primary || !sameBall(other, el)) return;
+      docked = docked || !!state.docked[id];
+      setDock(other, false, true);
+      delete balls[id];
+    });
+    return docked;
+  }
 
   // 拖动收纳用（宽松）：按住的那一点往上找到一个"定位着的小方块"——fixed/absolute/sticky 都认，图片球/图标球也认
   function grabbable(el) {
@@ -155,19 +190,27 @@
   function registerNative(info) {
     if (!info || !info.id) return;
     var el = info.el || DOC.getElementById(info.id) || null;
-    var b = balls[info.id] || {};
+    var b = balls[info.id] || (el ? registeredBall(el) : null) || {};
+    var wasDocked = !!state.docked[info.id] || !!state.docked[b.id];
+    if (el) wasDocked = mergeBalls(b, el) || wasDocked;
+    if (b.type === 'foreign') {
+      setDock(b, false, true);
+      delete balls[b.id];
+      b.selector = '';
+    }
     b.id = info.id; b.type = 'native';
     b.name = info.name || b.name || info.id;
     b.icon = info.icon || b.icon || (el ? guessIcon(el) : '');
     b.el = el || b.el || null;
     balls[info.id] = b;
-    if (state.docked[b.id]) setDock(b, true, true);
+    if (wasDocked) setDock(b, true, true);
+    saveState();
     scheduleRender();
   }
 
   function setDock(b, docked, silent) {
     if (!b) return;
-    var el = b.el || (b.selector ? DOC.querySelector(b.selector) : null) || DOC.getElementById(b.id);
+    var el = ballElement(b);
     b.el = el || b.el;
     if (b.type === 'native') {
       if (el) {
@@ -222,30 +265,42 @@
   function findBallElement(t) {
     if (!t || t.nodeType !== 1) return null;
     if (isOurs(t)) return null;
-    for (var id in balls) { var known = balls[id].el; if (known && known.contains(t)) return known; }
-    var el = t, depth = 0;
-    while (el && el.nodeType === 1 && depth < 12) {
-      for (var k in balls) { if (balls[k].el === el) return el; }
-      if (grabbable(el)) return el;
+    var el = t, depth = 0, candidate = null;
+    while (el && el !== DOC.body && el !== DOC.documentElement && el.nodeType === 1 && depth < 12) {
+      var known = null;
+      for (var id in balls) { if (ballElement(balls[id]) === el) { known = balls[id]; break; } }
+      if (known && known.type === 'native') return el;
+      if (known || grabbable(el)) candidate = el;
       el = el.parentNode; depth++;
     }
-    return null;
+    return candidate;
   }
   function collectElement(el, silent) {
-    for (var k in balls) { if (balls[k].el === el) { setDock(balls[k], true, silent); return; } }
+    el = findBallElement(el) || el;
+    var existing = registeredBall(el);
+    if (existing) {
+      mergeBalls(existing, el);
+      if (existing.el !== el && existing.type === 'foreign') {
+        setDock(existing, false, true);
+        existing.el = el; existing.selector = el.id ? '#' + cssId(el.id) : '';
+        existing.icon = guessIcon(el) || existing.icon;
+      }
+      setDock(existing, true, silent);
+      return;
+    }
     var key = foreignKey(el);
     var b = balls[key] || { id: key, type: 'foreign', el: el, selector: el.id ? '#' + cssId(el.id) : '', name: (el.id || el.getAttribute('title') || '\u5176\u4ed6\u60ac\u6d6e\u7403'), icon: guessIcon(el) };
     b.el = el; balls[key] = b;
     setDock(b, true, silent);
   }
   function collectAll() {
-    for (var k in balls) { var b = balls[k]; if (!state.docked[b.id]) setDock(b, true, true); }
+    Object.keys(balls).forEach(function (id) { var ball = balls[id]; if (!ball) return; var el = ballElement(ball); if (el) collectElement(el, true); });
     scanForeign().forEach(function (el) { collectElement(el, true); });
     saveState(); render();
   }
   function runByBall(b) {
     if (!b) return;
-    var el = b.el || (b.selector ? DOC.querySelector(b.selector) : null) || DOC.getElementById(b.id);
+    var el = ballElement(b);
     if (!el) return;
     try {
       var mk = function (type) { return new MouseEvent(type, { bubbles: true, cancelable: true, view: TOP }); };
@@ -276,11 +331,24 @@
       node.style.setProperty('font-style', icon.fontStyle, 'important');
       node.style.setProperty('color', icon.color, 'important');
     });
+    applyDockPosition();
   }
   function flash(el) { if (!el) return; el.classList.add('ycdk-flash'); setTimeout(function () { try { el.classList.remove('ycdk-flash'); } catch (e) {} }, 260); }
   function toggleDrawer(force) { state.open = (typeof force === 'boolean') ? force : !state.open; saveState(); applyOpen(); if (state.open) scheduleRender(); }
-  function applyOpen() { var h = H(), dr = DR(); if (!h || !dr) return; dr.classList.toggle('open', !!state.open); h.classList.toggle('open', !!state.open); }
+  function applyOpen() { var h = H(), dr = DR(); if (!h || !dr) return; dr.classList.toggle('open', !!state.open); h.classList.toggle('open', !!state.open); applyDockPosition(); }
   function applyHideHandle() { var h = H(); if (h) h.style.setProperty('display', cfg.hideHandle ? 'none' : 'flex', 'important'); }
+  function applyDockPosition(center) {
+    var handle = H(), drawer = DR();
+    if (!handle || !drawer) return;
+    var height = vh(), half = Math.max(28, state.open ? drawer.getBoundingClientRect().height / 2 : 0);
+    var preferred = Number.isFinite(state.dockTop) ? state.dockTop : (Number.isFinite(state.handleTop) ? state.handleTop + 28 / height * 100 : 50);
+    if (typeof center !== 'number') center = preferred / 100 * height;
+    var margin = Math.min(half + 8, height / 2);
+    center = Math.max(margin, Math.min(height - margin, center));
+    handle.style.setProperty('--ycdk-top', center + 'px');
+    drawer.style.setProperty('--ycdk-top', center + 'px');
+    return center;
+  }
 
   function buildDock() {
     if (ROOT.dock) return;
@@ -293,14 +361,34 @@
       '<button class="ycdk-all" data-all>\u4e00\u952e\u6536\u8d77\u5168\u90e8</button>';
     DOC.documentElement.appendChild(h); DOC.documentElement.appendChild(d);
     D.handle = h; D.drawer = d;
-    if (typeof state.handleTop === 'number') h.style.top = state.handleTop + '%';
     applyHideHandle();
-
-    var hp = { down: false, moved: false, startY: 0, startTop: 42 };
-    on(D, h, 'pointerdown', function (e) { hp.down = true; hp.moved = false; hp.startY = e.clientY; hp.startTop = (typeof state.handleTop === 'number') ? state.handleTop : 42; try { h.setPointerCapture(e.pointerId); } catch (er) {} e.preventDefault(); });
-    on(D, h, 'pointermove', function (e) { if (!hp.down) return; var dy = e.clientY - hp.startY; if (Math.abs(dy) > 6) hp.moved = true; if (hp.moved) { var pct = hp.startTop + dy / vh() * 100; pct = Math.max(6, Math.min(88, pct)); h.style.top = pct + '%'; state.handleTop = pct; } });
-    on(D, h, 'pointerup', function () { if (!hp.down) return; hp.down = false; if (hp.moved) saveState(); else toggleDrawer(); });
-    on(D, h, 'pointercancel', function () { hp.down = false; });
+    applyDockPosition();
+    [h, d.querySelector('.ycdk-hd')].forEach(function (grip) {
+      var drag = null;
+      on(D, grip, 'pointerdown', function (e) {
+        if (e.isPrimary === false || e.button !== 0 || e.target.closest('button')) return;
+        drag = { id: e.pointerId, y: e.clientY, center: applyDockPosition(), moved: false };
+        try { grip.setPointerCapture(e.pointerId); } catch (er) {}
+        e.preventDefault();
+      });
+      on(D, grip, 'pointermove', function (e) {
+        if (!drag || drag.id !== e.pointerId) return;
+        var delta = e.clientY - drag.y;
+        if (Math.abs(delta) > 6) drag.moved = true;
+        if (drag.moved) state.dockTop = applyDockPosition(drag.center + delta) / vh() * 100;
+      });
+      function endDrag(e, cancelled) {
+        if (!drag || drag.id !== e.pointerId) return;
+        var moved = drag.moved; drag = null;
+        try { grip.releasePointerCapture(e.pointerId); } catch (er) {}
+        if (moved) saveState();
+        else if (!cancelled && grip === h) toggleDrawer();
+      }
+      on(D, grip, 'pointerup', function (e) { endDrag(e, false); });
+      on(D, grip, 'pointercancel', function (e) { endDrag(e, true); });
+      on(D, grip, 'lostpointercapture', function (e) { endDrag(e, true); });
+    });
+    on(D, TOP, 'resize', function () { applyDockPosition(); });
 
     on(D, d, 'click', function (e) {
       var t = e.target;
@@ -313,16 +401,26 @@
     var pointerDrag = null, touchDrag = null, lastDrop = null;
     function startDrag(target, point, id) {
       var ball = findBallElement(target);
-      return ball ? { ball: ball, id: id, x: point.clientX, y: point.clientY } : null;
+      return ball ? { ball: ball, id: id, x: point.clientX, y: point.clientY, rect: ball.getBoundingClientRect() } : null;
     }
     function finishDrag(drag, point) {
       if (!drag || Math.hypot(point.clientX - drag.x, point.clientY - drag.y) < 6) return;
       try {
-        var target = cfg.hideHandle ? (state.open ? d : null) : h;
+        var targets = state.open ? [d] : [];
+        if (!cfg.hideHandle) targets.push(h);
+        var current = drag.ball.getBoundingClientRect(), initial = drag.rect;
+        var moved = current.width > 0 && current.height > 0 && Math.hypot(current.left - initial.left, current.top - initial.top) > 2;
+        var left = moved ? current.left : initial.left + point.clientX - drag.x;
+        var top = moved ? current.top : initial.top + point.clientY - drag.y;
+        var right = left + (moved ? current.width : initial.width), bottom = top + (moved ? current.height : initial.height);
+        var target = targets.find(function (zone) {
+          var rect = zone.getBoundingClientRect(), pad = zone === h ? 30 : 12;
+          if (!(rect.width > 0 && rect.height > 0)) return false;
+          var pointInside = point.clientX >= rect.left - pad && point.clientX <= rect.right + pad && point.clientY >= rect.top - pad && point.clientY <= rect.bottom + pad;
+          var ballOverlaps = right > rect.left - pad && left < rect.right + pad && bottom > rect.top - pad && top < rect.bottom + pad;
+          return pointInside || ballOverlaps;
+        });
         if (!target) return;
-        var rect = target.getBoundingClientRect(), pad = 30;
-        if (!(rect.width > 0 && rect.height > 0)) return;
-        if (!(point.clientX >= rect.left - pad && point.clientX <= rect.right + pad && point.clientY >= rect.top - pad && point.clientY <= rect.bottom + pad)) return;
         collectElement(drag.ball); flash(target);
         lastDrop = { ball: drag.ball, time: Date.now() };
       } catch (er) {}
@@ -378,12 +476,13 @@
   }
   function present() { try { TOP.dispatchEvent(new CustomEvent('ycdock:present')); } catch (e) {} }
   function reapplyForeign() {
-    for (var id in state.docked) {
-      var meta = state.docked[id]; if (!meta || !meta.foreign) continue;
-      var el = meta.selector ? DOC.querySelector(meta.selector) : null; if (!el) continue;
-      var b = balls[id] || { id: id, type: 'foreign', el: el, selector: meta.selector, name: (el.id || '\u5176\u4ed6\u60ac\u6d6e\u7403'), icon: guessIcon(el) };
-      b.el = el; balls[id] = b; forceHide(b);
-    }
+    Object.keys(state.docked).forEach(function (id) {
+      var meta = state.docked[id]; if (!meta || !meta.foreign) return;
+      var el = meta.selector ? DOC.querySelector(meta.selector) : null; if (!el) return;
+      delete state.docked[id];
+      collectElement(el, true);
+    });
+    saveState(); scheduleRender();
   }
   function destroyDock() {
     if (!ROOT.dock) return;
