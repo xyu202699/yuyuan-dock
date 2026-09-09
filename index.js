@@ -5,6 +5,7 @@
   }
   var TOP = getTop();
   var DOC = TOP.document;
+  var YCDK_VER = '1.0.1';
 
   function teardown(b) {
     if (!b) return;
@@ -32,7 +33,7 @@
   function H() { return ROOT.dock && ROOT.dock.handle; }
   function DR() { return ROOT.dock && ROOT.dock.drawer; }
 
-  // ---- 配置（启用 / 隐藏把手）----
+  // ---- 配置 ----
   var CFG_KEY = 'yc_dock_cfg';
   function loadCfg() { try { var c = JSON.parse(TOP.localStorage.getItem(CFG_KEY) || '{}') || {}; return { enabled: c.enabled !== false, hideHandle: !!c.hideHandle }; } catch (e) { return { enabled: true, hideHandle: false }; } }
   function saveCfg() { try { TOP.localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {} }
@@ -53,6 +54,7 @@
   function isImg(s) { return /^(data:|https?:|\/\/|blob:)/.test(String(s || '')); }
   function vw() { return TOP.innerWidth || 360; }
   function vh() { return TOP.innerHeight || 640; }
+  function isOurs(el) { var h = H(), dr = DR(); return el === h || el === dr || (h && h.contains(el)) || (dr && dr.contains(el)); }
 
   function guessIcon(el) {
     try {
@@ -64,34 +66,48 @@
     return '';
   }
   function foreignKey(el) { var cls = ''; try { cls = (el.className && el.className.toString) ? el.className.toString().slice(0, 30) : ''; } catch (e) {} return 'foreign:' + (el.id || '') + '|' + cls; }
+
+  // 拖动收纳用：你按住哪颗就认哪颗——只要是个固定定位的小方块就行（宽松，尊重你的意图）
+  function grabbable(el) {
+    try {
+      if (!el || el.nodeType !== 1) return false;
+      if (isOurs(el)) return false;
+      var cs = TOP.getComputedStyle(el);
+      if (!cs || cs.position !== 'fixed') return false;
+      if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+      var r = el.getBoundingClientRect();
+      if (r.width < 14 || r.height < 14 || r.width > 220 || r.height > 220) return false;
+      return true;
+    } catch (e) { return false; }
+  }
+  // 一键扫描用：略严一点，避免把固定工具栏也当球
   function looksLikeBall(el) {
     try {
       if (!el || el.nodeType !== 1) return false;
-      var h = H(), dr = DR();
-      if (el === h || el === dr) return false;
-      if (h && h.contains(el)) return false;
-      if (dr && dr.contains(el)) return false;
+      if (isOurs(el)) return false;
       for (var k in balls) { if (balls[k].el === el) return false; }
       var cs = TOP.getComputedStyle(el);
       if (!cs || cs.position !== 'fixed') return false;
       if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') < 0.2) return false;
       var r = el.getBoundingClientRect();
-      if (r.width < 20 || r.width > 110 || r.height < 20 || r.height > 110) return false;
-      if (Math.abs(r.width - r.height) > Math.max(r.width, r.height) * 0.7) return false;
-      var nearEdge = (r.left < 150 || r.right > vw() - 150 || r.top < 150 || r.bottom > vh() - 150);
+      if (r.width < 18 || r.width > 130 || r.height < 18 || r.height > 130) return false;
+      var lo = Math.min(r.width, r.height), hi = Math.max(r.width, r.height);
+      if (hi > lo * 2.5) return false; // 太长条=多半是工具栏，不是球
+      var nearEdge = (r.left < 180 || r.right > vw() - 180 || r.top < 130 || r.bottom > vh() - 130);
       if (!nearEdge) return false;
-      var z = parseInt(cs.zIndex, 10); if (isNaN(z)) z = 0;
-      if (z < 5) return false;
       return true;
     } catch (e) { return false; }
   }
   function scanForeign() {
-    var pool = [], seen = new Set(), out = [];
-    try { Array.prototype.push.apply(pool, DOC.documentElement.children); } catch (e) {}
-    try { if (DOC.body) Array.prototype.push.apply(pool, DOC.body.children); } catch (e) {}
-    var deeper = []; pool.forEach(function (el) { try { Array.prototype.push.apply(deeper, el.children); } catch (e) {} });
-    Array.prototype.push.apply(pool, deeper);
-    pool.forEach(function (el) { if (seen.has(el)) return; seen.add(el); if (looksLikeBall(el)) out.push(el); });
+    var out = [], seen = new Set(), nodes;
+    try { nodes = DOC.querySelectorAll('html > *, body > *, body > * > *, body > * > * > *'); } catch (e) { nodes = []; }
+    Array.prototype.forEach.call(nodes, function (el) {
+      if (seen.has(el)) return; seen.add(el);
+      if (!looksLikeBall(el)) return;
+      var anc = el.parentNode, dup = false;
+      while (anc && anc.nodeType === 1) { if (out.indexOf(anc) >= 0) { dup = true; break; } anc = anc.parentNode; }
+      if (!dup) out.push(el);
+    });
     return out;
   }
 
@@ -158,15 +174,14 @@
     if (el && el.style.display === 'none') el.style.removeProperty('display');
   }
 
+  // 拖动时从按下的目标往上找到那颗球（宽松）
   function findBallElement(t) {
     if (!t || t.nodeType !== 1) return null;
-    var h = H(), dr = DR();
-    if (h && (t === h || h.contains(t))) return null;
-    if (dr && (t === dr || dr.contains(t))) return null;
+    if (isOurs(t)) return null;
     var el = t, depth = 0;
-    while (el && el.nodeType === 1 && depth < 8) {
+    while (el && el.nodeType === 1 && depth < 10) {
       for (var k in balls) { if (balls[k].el === el) return el; }
-      if (looksLikeBall(el)) return el;
+      if (grabbable(el)) return el;
       el = el.parentNode; depth++;
     }
     return null;
@@ -212,7 +227,7 @@
   function flash(el) { if (!el) return; el.classList.add('ycdk-flash'); setTimeout(function () { try { el.classList.remove('ycdk-flash'); } catch (e) {} }, 260); }
   function toggleDrawer(force) { state.open = (typeof force === 'boolean') ? force : !state.open; saveState(); applyOpen(); if (state.open) scheduleRender(); }
   function applyOpen() { var h = H(), dr = DR(); if (!h || !dr) return; dr.classList.toggle('open', !!state.open); h.classList.toggle('open', !!state.open); }
-  function applyHideHandle() { var h = H(); if (h) h.style.display = cfg.hideHandle ? 'none' : 'flex'; }
+  function applyHideHandle() { var h = H(); if (h) h.style.setProperty('display', cfg.hideHandle ? 'none' : 'flex', 'important'); }
 
   // ================= 建/拆 收纳栏 =================
   function buildDock() {
@@ -251,24 +266,10 @@
     on(D, DOC, 'pointerup', function (e) {
       if (!db.active || !db.el) { db.active = false; db.el = null; return; }
       db.active = false;
-      try { var r = h.getBoundingClientRect(), pad = 26; var hit = e.clientX >= r.left - pad && e.clientX <= r.right + pad && e.clientY >= r.top - pad && e.clientY <= r.bottom + pad; if (hit) { collectElement(db.el); flash(h); } } catch (er) {}
+      try { var r = h.getBoundingClientRect(); if (r.width > 0) { var pad = 30; var hit = e.clientX >= r.left - pad && e.clientX <= r.right + pad && e.clientY >= r.top - pad && e.clientY <= r.bottom + pad; if (hit) { collectElement(db.el); flash(h); } } } catch (er) {}
       db.el = null;
     }, true);
     on(D, DOC, 'pointercancel', function () { db.active = false; db.el = null; }, true);
-
-    // 从屏幕右边缘往左滑＝打开抽屉（把手藏了也能拉出来）
-    var es = { active: false, x: 0, y: 0 };
-    on(D, DOC, 'pointerdown', function (e) {
-      es.active = false;
-      var t = e.target;
-      if (h && (t === h || h.contains(t))) return;
-      if (d && (t === d || d.contains(t))) return;
-      if (findBallElement(t)) return;
-      if (state.open) return;
-      if (e.clientX >= vw() - 66 && e.clientX <= vw() - 22) { es.active = true; es.x = e.clientX; es.y = e.clientY; }
-    }, true);
-    on(D, DOC, 'pointermove', function (e) { if (!es.active) return; var dx = e.clientX - es.x, dy = e.clientY - es.y; if (dx < -28 && Math.abs(dx) > Math.abs(dy)) { es.active = false; toggleDrawer(true); } }, true);
-    on(D, DOC, 'pointerup', function () { es.active = false; }, true);
 
     // 握手
     on(D, TOP, 'ycdock:hello', function (e) { registerNative(e.detail || {}); });
@@ -297,7 +298,6 @@
   }
   function destroyDock() {
     if (!ROOT.dock) return;
-    // 收进去的球全部放回屏幕
     try {
       Object.keys(state.docked).slice().forEach(function (id) {
         var b = balls[id];
@@ -312,38 +312,10 @@
     TOP.__ycDockPresent = false;
   }
 
-  // ================= 扩展设置面板（启用 / 隐藏把手）=================
-  function injectSettings() {
-    var S = ROOT.settings = mkBucket();
-    var tries = 0;
-    (function tryInject() {
-      if (ROOT.settings !== S) return;
-      var host = DOC.getElementById('extensions_settings2') || DOC.getElementById('extensions_settings');
-      if (!host) { if (tries++ < 25) setTimeout(tryInject, 800); return; }
-      if (DOC.getElementById('yc-dock-settings')) return;
-      var box = DOC.createElement('div'); box.id = 'yc-dock-settings'; box.className = 'yc-dock-settings';
-      box.innerHTML =
-        '<div class="ycdk-set-head"><b>芋圆收纳by小芋</b><span class="ycdk-set-caret">▾</span></div>' +
-        '<div class="ycdk-set-body">' +
-        '<label class="ycdk-set-row"><input type="checkbox" id="ycdk-enabled"> <span>启用芋圆收纳</span></label>' +
-        '<label class="ycdk-set-row"><input type="checkbox" id="ycdk-hidehandle"> <span>隐藏边缘把手（从屏幕右边缘往左滑打开）</span></label>' +
-        '<div class="ycdk-set-note">关掉「启用」后本收纳完全停用，收进去的球会全部放回屏幕。</div>' +
-        '</div>';
-      host.appendChild(box); S.el = box;
-      var head = box.querySelector('.ycdk-set-head'), body = box.querySelector('.ycdk-set-body');
-      on(S, head, 'click', function () { body.style.display = (body.style.display === 'none') ? '' : 'none'; });
-      var en = box.querySelector('#ycdk-enabled'), hh = box.querySelector('#ycdk-hidehandle');
-      en.checked = cfg.enabled; hh.checked = cfg.hideHandle;
-      on(S, en, 'change', function () { cfg.enabled = en.checked; saveCfg(); if (cfg.enabled) buildDock(); else destroyDock(); });
-      on(S, hh, 'change', function () { cfg.hideHandle = hh.checked; saveCfg(); applyHideHandle(); });
-    })();
-  }
-
-  // 无手势冲突的打开方式：魔棒菜单按钮 + 斜杠命令 /dock（回调走 TOP.__ycDockToggle，热重载后自动指向最新）
+  // ================= 打开方式（无手势冲突）=================
   function openDrawerToggle() { if (!cfg.enabled) return; if (!ROOT.dock) { buildDock(); toggleDrawer(true); return; } toggleDrawer(); }
   TOP.__ycDockToggle = openDrawerToggle;
   function registerOpeners() {
-    // 斜杠命令 /dock
     try {
       var ctx = (TOP.SillyTavern && TOP.SillyTavern.getContext) ? TOP.SillyTavern.getContext() : null;
       var cb = function () { try { TOP.__ycDockToggle && TOP.__ycDockToggle(); } catch (e) {} return ''; };
@@ -355,7 +327,6 @@
         TOP.registerSlashCommand('dock', cb, [], '\u6253\u5f00/\u6536\u8d77 \u828b\u5706\u6536\u7eb3\u62bd\u5c49', true, true);
       }
     } catch (e) {}
-    // 魔棒/扩展快捷菜单里放一个「芋圆收纳」按钮
     var tries = 0;
     (function tryMenu() {
       try {
@@ -370,6 +341,45 @@
         item.addEventListener('click', function () { try { TOP.__ycDockToggle && TOP.__ycDockToggle(); } catch (e) {} });
         menu.appendChild(item);
       } catch (e) {}
+    })();
+  }
+
+  function openManage() {
+    try {
+      var b = DOC.getElementById('extensions_details') || DOC.getElementById('rm_extensions_button');
+      if (b) { b.click(); return true; }
+      var cands = DOC.querySelectorAll('.menu_button, .interactable, button, a');
+      for (var i = 0; i < cands.length; i++) { var tx = (cands[i].textContent || '').trim(); if (tx.length <= 24 && /Manage extensions|\u7ba1\u7406\u6269\u5c55/i.test(tx)) { cands[i].click(); return true; } }
+    } catch (e) {}
+    return false;
+  }
+
+  // ================= 扩展设置面板（套 ST 标准样式）=================
+  function injectSettings() {
+    var S = ROOT.settings = mkBucket();
+    var tries = 0;
+    (function tryInject() {
+      if (ROOT.settings !== S) return;
+      var host = DOC.getElementById('extensions_settings2') || DOC.getElementById('extensions_settings');
+      if (!host) { if (tries++ < 25) setTimeout(tryInject, 800); return; }
+      if (DOC.getElementById('yc-dock-settings')) return;
+      var box = DOC.createElement('div'); box.id = 'yc-dock-settings';
+      box.innerHTML =
+        '<div class="inline-drawer wide100p">' +
+        '<div class="inline-drawer-toggle inline-drawer-header"><b>芋圆收纳</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>' +
+        '<div class="inline-drawer-content">' +
+        '<label class="checkbox_label" for="ycdk-enabled"><input id="ycdk-enabled" type="checkbox"><span>启用芋圆收纳</span></label>' +
+        '<label class="checkbox_label" for="ycdk-hidehandle"><input id="ycdk-hidehandle" type="checkbox"><span>隐藏边栏</span></label>' +
+        '<div class="ycdk-set-note">隐藏边栏后，可通过魔法棒（输入框旁的魔杖图标）点击「芋圆收纳」显示出收纳栏，或输入 /dock 打开。</div>' +
+        '<div class="ycdk-set-ver">当前版本 v' + YCDK_VER + ' · <span class="ycdk-manage" title="打开扩展管理去点更新">检查/安装更新</span></div>' +
+        '<div class="ycdk-set-note">有更新时，在 SillyTavern「扩展 → Manage extensions（管理扩展）」里找到本扩展点更新即可，不用重装。关掉「启用」＝完全停用、收进去的球全部放回屏幕。</div>' +
+        '</div></div>';
+      host.appendChild(box); S.el = box;
+      var en = box.querySelector('#ycdk-enabled'), hh = box.querySelector('#ycdk-hidehandle');
+      en.checked = cfg.enabled; hh.checked = cfg.hideHandle;
+      on(S, en, 'change', function () { cfg.enabled = en.checked; saveCfg(); if (cfg.enabled) buildDock(); else destroyDock(); });
+      on(S, hh, 'change', function () { cfg.hideHandle = hh.checked; saveCfg(); applyHideHandle(); });
+      var mng = box.querySelector('.ycdk-manage'); if (mng) on(S, mng, 'click', function () { if (!openManage()) mng.textContent = '\u8bf7\u5230 \u6269\u5c55\u2192Manage extensions \u91cc\u66f4\u65b0'; });
     })();
   }
 
