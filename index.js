@@ -5,7 +5,7 @@
   }
   var TOP = getTop();
   var DOC = TOP.document;
-  var YCDK_VER = '1.0.4';
+  var YCDK_VER = '1.0.6';
   var YCDK_NAME = '\u828b\u5706\u6536\u7eb3';
 
   function teardown(b) {
@@ -230,6 +230,7 @@
     } else { if (docked) forceHide(b); else forceShow(b); }
     if (docked) state.docked[b.id] = { foreign: b.type === 'foreign', selector: b.selector || '' };
     else delete state.docked[b.id];
+    if (!docked && !silent && b.type === 'foreign') revealForeign(b);
     if (!silent) { saveState(); scheduleRender(); }
   }
 
@@ -260,6 +261,39 @@
       if (previous && previous.display) el.style.setProperty('display', previous.display, previous.priority);
       else el.style.removeProperty('display');
     }
+  }
+
+  function revealForeign(ball) {
+    var el = ballElement(ball);
+    if (!el) return;
+    var rect = el.getBoundingClientRect();
+    if (!(rect.width > 0 && rect.height > 0)) return;
+    var viewport = TOP.visualViewport;
+    var width = viewport ? viewport.width : vw(), height = viewport ? viewport.height : vh();
+    var originX = viewport ? viewport.offsetLeft : 0, originY = viewport ? viewport.offsetTop : 0;
+    var minLeft = originX + 12, minTop = originY + Math.min(80, height * 0.15);
+    var maxLeft = Math.max(minLeft, originX + width - rect.width - 12);
+    var maxTop = Math.max(minTop, originY + height - rect.height - 12);
+    var outside = rect.left < originX + 4 || rect.top < originY + 4 || rect.right > originX + width - 4 || rect.bottom > originY + height - 4;
+    var left = outside ? Math.max(minLeft, Math.min(maxLeft, rect.left)) : rect.left;
+    var top = outside ? Math.max(minTop, Math.min(maxTop, rect.top)) : rect.top;
+    var drawer = DR(), covered = drawer && state.open ? drawer.getBoundingClientRect() : null;
+    if (covered && left < covered.right && left + rect.width > covered.left && top < covered.bottom && top + rect.height > covered.top) {
+      var beside = covered.left - rect.width - 12;
+      if (beside >= minLeft) left = Math.min(maxLeft, beside);
+      else if (covered.bottom + 12 <= maxTop) top = covered.bottom + 12;
+      else top = Math.max(minTop, covered.top - rect.height - 12);
+    }
+    if (Math.abs(left - rect.left) < 1 && Math.abs(top - rect.top) < 1) return;
+    var style = TOP.getComputedStyle(el), cssLeft = parseFloat(style.left), cssTop = parseFloat(style.top);
+    if (!Number.isFinite(cssLeft)) cssLeft = el.offsetLeft;
+    if (!Number.isFinite(cssTop)) cssTop = el.offsetTop;
+    var scaleX = el.offsetWidth ? rect.width / el.offsetWidth : 1;
+    var scaleY = el.offsetHeight ? rect.height / el.offsetHeight : 1;
+    el.style.setProperty('left', (cssLeft + (left - rect.left) / scaleX) + 'px', el.style.getPropertyPriority('left'));
+    el.style.setProperty('top', (cssTop + (top - rect.top) / scaleY) + 'px', el.style.getPropertyPriority('top'));
+    el.style.setProperty('right', 'auto', el.style.getPropertyPriority('right'));
+    el.style.setProperty('bottom', 'auto', el.style.getPropertyPriority('bottom'));
   }
 
   function findBallElement(t) {
@@ -335,12 +369,12 @@
   }
   function flash(el) { if (!el) return; el.classList.add('ycdk-flash'); setTimeout(function () { try { el.classList.remove('ycdk-flash'); } catch (e) {} }, 260); }
   function toggleDrawer(force) { state.open = (typeof force === 'boolean') ? force : !state.open; saveState(); applyOpen(); if (state.open) scheduleRender(); }
-  function applyOpen() { var h = H(), dr = DR(); if (!h || !dr) return; dr.classList.toggle('open', !!state.open); h.classList.toggle('open', !!state.open); applyDockPosition(); }
+  function applyOpen() { var h = H(), dr = DR(); if (!h || !dr) return; dr.classList.toggle('open', !!state.open); h.classList.toggle('open', !!state.open); h.setAttribute('aria-expanded', String(state.open)); applyDockPosition(); }
   function applyHideHandle() { var h = H(); if (h) h.style.setProperty('display', cfg.hideHandle ? 'none' : 'flex', 'important'); }
   function applyDockPosition(center) {
     var handle = H(), drawer = DR();
     if (!handle || !drawer) return;
-    var height = vh(), half = Math.max(28, state.open ? drawer.getBoundingClientRect().height / 2 : 0);
+    var height = vh(), half = Math.max(32, state.open ? drawer.getBoundingClientRect().height / 2 : 0);
     var preferred = Number.isFinite(state.dockTop) ? state.dockTop : (Number.isFinite(state.handleTop) ? state.handleTop + 28 / height * 100 : 50);
     if (typeof center !== 'number') center = preferred / 100 * height;
     var margin = Math.min(half + 8, height / 2);
@@ -353,7 +387,9 @@
   function buildDock() {
     if (ROOT.dock) return;
     var D = ROOT.dock = mkBucket();
-    var h = DOC.createElement('div'); h.id = 'yc-dock-handle'; h.title = '\u60ac\u6d6e\u7403\u6536\u7eb3'; h.innerHTML = '<span class="ycdk-grip"></span>';
+    var h = DOC.createElement('div'); h.id = 'yc-dock-handle'; h.title = '点击展开或收起，按住上下拖动'; h.innerHTML = '<span class="ycdk-grip" aria-hidden="true"></span>';
+    h.setAttribute('role', 'button'); h.tabIndex = 0;
+    h.setAttribute('aria-label', '悬浮球收纳'); h.setAttribute('aria-controls', 'yc-dock-drawer');
     var d = DOC.createElement('div'); d.id = 'yc-dock-drawer';
     d.innerHTML =
       '<div class="ycdk-hd"><span>\u60ac\u6d6e\u7403\u6536\u7eb3</span><button class="ycdk-x" data-x>\u00d7</button></div>' +
@@ -363,18 +399,23 @@
     D.handle = h; D.drawer = d;
     applyHideHandle();
     applyDockPosition();
+    on(D, h, 'keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      if (!e.repeat) toggleDrawer();
+    });
     [h, d.querySelector('.ycdk-hd')].forEach(function (grip) {
       var drag = null;
       on(D, grip, 'pointerdown', function (e) {
         if (e.isPrimary === false || e.button !== 0 || e.target.closest('button')) return;
-        drag = { id: e.pointerId, y: e.clientY, center: applyDockPosition(), moved: false };
+        drag = { id: e.pointerId, y: e.clientY, center: applyDockPosition(), moved: false, threshold: e.pointerType === 'touch' ? 10 : 6 };
         try { grip.setPointerCapture(e.pointerId); } catch (er) {}
         e.preventDefault();
       });
       on(D, grip, 'pointermove', function (e) {
         if (!drag || drag.id !== e.pointerId) return;
         var delta = e.clientY - drag.y;
-        if (Math.abs(delta) > 6) drag.moved = true;
+        if (Math.abs(delta) > drag.threshold) drag.moved = true;
         if (drag.moved) state.dockTop = applyDockPosition(drag.center + delta) / vh() * 100;
       });
       function endDrag(e, cancelled) {
@@ -421,8 +462,13 @@
           return pointInside || ballOverlaps;
         });
         if (!target) return;
-        collectElement(drag.ball); flash(target);
         lastDrop = { ball: drag.ball, time: Date.now() };
+        setTimeout(function () {
+          if (ROOT.dock !== D || TOP.__ycDock !== ROOT || !cfg.enabled) return;
+          var ball = drag.ball.isConnected ? drag.ball : (drag.ball.id ? DOC.getElementById(drag.ball.id) : null);
+          if (!ball) return;
+          collectElement(ball); flash(target);
+        }, 0);
       } catch (er) {}
     }
     on(D, DOC, 'pointerdown', function (e) {
