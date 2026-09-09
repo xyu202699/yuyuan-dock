@@ -5,7 +5,7 @@
   }
   var TOP = getTop();
   var DOC = TOP.document;
-  var YCDK_VER = '1.0.7';
+  var YCDK_VER = '1.0.8';
   var YCDK_NAME = '\u828b\u5706\u6536\u7eb3';
 
   function teardown(b) {
@@ -332,14 +332,60 @@
     scanForeign().forEach(function (el) { collectElement(el, true); });
     saveState(); render();
   }
+  // 运行一颗收着的球：模仿一次真实点按（pointer→touch→未被拦截才补mouse/click），
+  // 派在最里层元素上让它往上冒泡；期间让球"有布局但看不见"，让读位置的打开逻辑也能跑通
+  function deepTarget(el) {
+    try {
+      var t = el.querySelector && (el.querySelector('button, a, [role="button"]') || el.querySelector('img, svg, i, span'));
+      if (t) return t;
+      var g = 0; t = el; while (t.children && t.children.length === 1 && g++ < 8) t = t.children[0];
+      return t;
+    } catch (e) { return el; }
+  }
   function runByBall(b) {
     if (!b) return;
     var el = ballElement(b);
     if (!el) return;
+    var obs = b.force && b.force.observer;
+    try { if (obs) obs.disconnect(); } catch (e) {}
     try {
-      var mk = function (type) { return new MouseEvent(type, { bubbles: true, cancelable: true, view: TOP }); };
-      el.dispatchEvent(mk('mousedown')); el.dispatchEvent(mk('mouseup')); el.dispatchEvent(mk('click'));
+      // 1) 有布局但看不见
+      el.style.setProperty('visibility', 'hidden', 'important');
+      el.style.setProperty('pointer-events', 'none', 'important');
+      el.style.removeProperty('display');
+      if (b.type === 'native') { if (b.prevDisplay) el.style.display = b.prevDisplay; }
+      else if (b.force && b.force.display) { try { el.style.setProperty('display', b.force.display, b.force.priority || ''); } catch (e) {} }
+      void el.offsetWidth;
+      // 2) 找最里层目标 + 真实坐标
+      var tgt = deepTarget(el);
+      var r = el.getBoundingClientRect(); var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      var base = { bubbles: true, cancelable: true, view: TOP, clientX: cx, clientY: cy, screenX: cx, screenY: cy, button: 0, buttons: 1 };
+      var prevented = false;
+      var fire = function (ev) { tgt.dispatchEvent(ev); if (ev.defaultPrevented) prevented = true; };
+      // 3) 真实顺序：pointerdown → touchstart → pointerup → touchend → (未拦截) mousedown → mouseup → click
+      var PE = TOP.PointerEvent;
+      var hasTouch = (typeof TOP.Touch === 'function' && typeof TOP.TouchEvent === 'function');
+      var touch = null;
+      if (hasTouch) { try { touch = new TOP.Touch({ identifier: 1, target: tgt, clientX: cx, clientY: cy, pageX: cx, pageY: cy, screenX: cx, screenY: cy }); } catch (e) { touch = null; } }
+      if (PE) { try { fire(new PE('pointerdown', Object.assign({}, base, { pointerId: 1, pointerType: touch ? 'touch' : 'mouse', isPrimary: true }))); } catch (e) {} }
+      if (touch) { try { fire(new TOP.TouchEvent('touchstart', { bubbles: true, cancelable: true, view: TOP, touches: [touch], targetTouches: [touch], changedTouches: [touch] })); } catch (e) {} }
+      if (PE) { try { fire(new PE('pointerup', Object.assign({}, base, { pointerId: 1, pointerType: touch ? 'touch' : 'mouse', isPrimary: true, buttons: 0 }))); } catch (e) {} }
+      if (touch) { try { fire(new TOP.TouchEvent('touchend', { bubbles: true, cancelable: true, view: TOP, touches: [], targetTouches: [], changedTouches: [touch] })); } catch (e) {} }
+      if (!prevented) {
+        try { tgt.dispatchEvent(new MouseEvent('mousedown', base)); } catch (e) {}
+        try { tgt.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, base, { buttons: 0 }))); } catch (e) {}
+        try { tgt.dispatchEvent(new MouseEvent('click', Object.assign({}, base, { buttons: 0 }))); } catch (e) {}
+      }
     } catch (e) { try { el.click(); } catch (er) {} }
+    // 4) 稍等一拍再藏回去（给异步打开逻辑读位置的机会），然后把观察器接回来
+    setTimeout(function () {
+      try {
+        el.style.setProperty('display', 'none', 'important');
+        el.style.removeProperty('visibility');
+        el.style.removeProperty('pointer-events');
+      } catch (e) {}
+      try { if (obs && state.docked[b.id]) obs.observe(el, { attributes: true, attributeFilter: ['style', 'class'] }); } catch (e) {}
+    }, 120);
   }
 
   function chipHTML(b) {
