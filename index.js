@@ -5,7 +5,7 @@
   }
   var TOP = getTop();
   var DOC = TOP.document;
-  var YCDK_VER = '1.0.8';
+  var YCDK_VER = '1.0.9';
   var YCDK_NAME = '\u828b\u5706\u6536\u7eb3';
 
   function teardown(b) {
@@ -102,8 +102,44 @@
     return '';
   }
   var foreignIds = new WeakMap(), foreignSequence = 0;
+  // 容器里"一个小球 + 一个（大的/隐藏的）面板"时，只认那颗小球——藏容器会把面板一起藏掉、开了也看不见
+  function refineBall(el) {
+    try {
+      for (var round = 0; round < 2; round++) {
+        var kids = el.children; if (!kids || kids.length < 2) return el;
+        var best = null, bestArea = Infinity, hasPanel = false, info = [];
+        for (var q = 0; q < kids.length; q++) { for (var bid in balls) { if (ballElement(balls[bid]) === kids[q]) return kids[q]; } }
+        for (var i = 0; i < kids.length; i++) {
+          var c = kids[i]; if (c.nodeType !== 1 || /^(script|style|link)$/i.test(c.tagName)) continue;
+          var cs = TOP.getComputedStyle(c), r = c.getBoundingClientRect();
+          var hidden = cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') < 0.2 || cs.pointerEvents === 'none';
+          var big = r.width > 200 || r.height > 200;
+          var small = !hidden && r.width >= 18 && r.height >= 18 && r.width <= 160 && r.height <= 160 && Math.max(r.width, r.height) <= Math.min(r.width, r.height) * 2.5;
+          info.push({ c: c, hidden: hidden, big: big, small: small, area: r.width * r.height });
+        }
+        for (var j = 0; j < info.length; j++) { if (info[j].small && info[j].area < bestArea) { best = info[j].c; bestArea = info[j].area; } }
+        if (!best) return el;
+        for (var k = 0; k < info.length; k++) { if (info[k].c !== best && (info[k].hidden || info[k].big)) { hasPanel = true; break; } }
+        if (!hasPanel) return el;
+        el = best;
+      }
+      return el;
+    } catch (e) { return el; }
+  }
+  // 没 id 的球也给个能找回来的选择器：#父id > .类名 / :nth-child
+  function buildSelector(el) {
+    try {
+      if (el.id) return '#' + cssId(el.id);
+      var p = el.parentNode; if (!p || p.nodeType !== 1 || !p.id) return '';
+      var cls = ''; try { cls = (el.className && el.className.toString) ? el.className.toString().trim().split(/\s+/)[0] : ''; } catch (e) {}
+      if (cls) { var sel = '#' + cssId(p.id) + ' > .' + cssId(cls); if (DOC.querySelectorAll(sel).length === 1) return sel; }
+      var idx = Array.prototype.indexOf.call(p.children, el) + 1;
+      return '#' + cssId(p.id) + ' > :nth-child(' + idx + ')';
+    } catch (e) { return ''; }
+  }
   function foreignKey(el) {
     if (el.id) return 'foreign:' + el.id;
+    try { var p = el.parentNode; if (p && p.nodeType === 1 && p.id) { var c0 = (el.className && el.className.toString) ? el.className.toString().trim().split(/\s+/)[0] : ''; return 'foreign:' + p.id + '>' + (c0 || 'child'); } } catch (e) {}
     if (!foreignIds.has(el)) foreignIds.set(el, 'foreign:anonymous:' + (++foreignSequence));
     return foreignIds.get(el);
   }
@@ -303,27 +339,28 @@
     while (el && el !== DOC.body && el !== DOC.documentElement && el.nodeType === 1 && depth < 12) {
       var known = null;
       for (var id in balls) { if (ballElement(balls[id]) === el) { known = balls[id]; break; } }
-      if (known && known.type === 'native') return el;
-      if (known || grabbable(el)) candidate = el;
+      if (known) return el; // 已经认识的球直接认它，别再往上爬到装着面板的容器
+      if (grabbable(el)) candidate = el;
       el = el.parentNode; depth++;
     }
     return candidate;
   }
   function collectElement(el, silent) {
     el = findBallElement(el) || el;
+    el = refineBall(el);
     var existing = registeredBall(el);
     if (existing) {
       mergeBalls(existing, el);
       if (existing.el !== el && existing.type === 'foreign') {
         setDock(existing, false, true);
-        existing.el = el; existing.selector = el.id ? '#' + cssId(el.id) : '';
+        existing.el = el; existing.selector = buildSelector(el);
         existing.icon = guessIcon(el) || existing.icon;
       }
       setDock(existing, true, silent);
       return;
     }
     var key = foreignKey(el);
-    var b = balls[key] || { id: key, type: 'foreign', el: el, selector: el.id ? '#' + cssId(el.id) : '', name: (el.id || el.getAttribute('title') || '\u5176\u4ed6\u60ac\u6d6e\u7403'), icon: guessIcon(el) };
+    var b = balls[key] || { id: key, type: 'foreign', el: el, selector: buildSelector(el), name: (el.id || el.getAttribute('title') || (el.parentNode && el.parentNode.id) || '\u5176\u4ed6\u60ac\u6d6e\u7403'), icon: guessIcon(el) };
     b.el = el; balls[key] = b;
     setDock(b, true, silent);
   }
@@ -336,10 +373,23 @@
   // 派在最里层元素上让它往上冒泡；期间让球"有布局但看不见"，让读位置的打开逻辑也能跑通
   function deepTarget(el) {
     try {
-      var t = el.querySelector && (el.querySelector('button, a, [role="button"]') || el.querySelector('img, svg, i, span'));
-      if (t) return t;
-      var g = 0; t = el; while (t.children && t.children.length === 1 && g++ < 8) t = t.children[0];
-      return t;
+      var R = el.getBoundingClientRect();
+      var okNode = function (n) {
+        try {
+          var cs = TOP.getComputedStyle(n); if (!cs || cs.display === 'none' || parseFloat(cs.opacity || '1') < 0.2 || cs.pointerEvents === 'none') return false;
+          var r = n.getBoundingClientRect(); if (!(r.width > 0 && r.height > 0)) return false;
+          if (R.width > 0 && (r.left >= R.right || r.right <= R.left || r.top >= R.bottom || r.bottom <= R.top)) return false; // 不在球范围内的不要
+          for (var a = n.parentNode; a && a !== el; a = a.parentNode) { var acs = TOP.getComputedStyle(a); if (acs.display === 'none' || parseFloat(acs.opacity || '1') < 0.2 || acs.pointerEvents === 'none') return false; }
+          return true;
+        } catch (e) { return false; }
+      };
+      var groups = ['button, a, [role="button"]', 'img, svg, i, span'];
+      for (var gi = 0; gi < groups.length; gi++) {
+        var list = el.querySelectorAll ? el.querySelectorAll(groups[gi]) : [];
+        for (var i = 0; i < list.length; i++) { if (okNode(list[i])) return list[i]; }
+      }
+      var g = 0, t = el; while (t.children && t.children.length === 1 && g++ < 8) t = t.children[0];
+      return okNode(t) ? t : el;
     } catch (e) { return el; }
   }
   function runByBall(b) {
