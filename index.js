@@ -1,15 +1,11 @@
-/* 芋圆收纳 · 悬浮球收纳栏  v1.0.0  作者：小芋 */
 (function () {
   'use strict';
-
-  // ---- 顶层窗口（酒馆常把页面塞进 iframe/transform，跟芋圆机同款处理）----
   function getTop() {
     try { var w = window; for (var i = 0; i < 6 && w.parent && w.parent !== w; i++) { try { void w.parent.document; w = w.parent; } catch (e) { break; } } return w; } catch (e) { return window; }
   }
   var TOP = getTop();
   var DOC = TOP.document;
 
-  // ---- 先拆掉上一版实例（酒馆热重载不刷页面，旧定时器/监听会残留、跟新版打架）----
   try {
     if (TOP.__ycDock) {
       var old = TOP.__ycDock;
@@ -26,19 +22,16 @@
   function on(t, type, fn, opt) { try { t.addEventListener(type, fn, opt); API.listeners.push({ t: t, type: type, fn: fn, opt: opt }); } catch (e) {} }
   function every(ms, fn) { var id = setInterval(fn, ms); API.intervals.push(id); return id; }
 
-  // ---- 存档 ----
   var LS_KEY = 'yc_dock_v1';
   function loadState() { try { return JSON.parse(TOP.localStorage.getItem(LS_KEY) || '{}') || {}; } catch (e) { return {}; } }
   function saveState() { try { TOP.localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
   var state = loadState();
-  state.docked = state.docked || {};   // id -> { foreign:bool, selector:'' }  记住哪些球是收起来的
-  state.open = !!state.open;           // 抽屉是否展开
+  state.docked = state.docked || {};
+  state.open = !!state.open;
 
-  // ---- 已知的球 ----  id -> { id, name, icon, el, type, selector?, freePos?, force? }
   var balls = {};
   API.balls = balls;
 
-  // ================= 工具 =================
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function cssId(id) { try { return (TOP.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/[^\w-]/g, '\\$&'); } catch (e) { return id; } }
   function isImg(s) { return /^(data:|https?:|\/\/|blob:)/.test(String(s || '')); }
@@ -54,31 +47,28 @@
       var m = bg.match(/url\(["']?(.*?)["']?\)/);
       if (m && m[1]) return m[1];
       var t = (el.textContent || '').trim();
-      if (t && t.length <= 2) return t; // 单字/emoji 当图标
+      if (t && t.length <= 2) return t;
     } catch (e) {}
     return '';
   }
-
   function foreignKey(el) {
     var cls = '';
     try { cls = (el.className && el.className.toString) ? el.className.toString().slice(0, 30) : ''; } catch (e) {}
     return 'foreign:' + (el.id || '') + '|' + cls;
   }
-
-  // 一个元素"像不像悬浮球"（用来发现第三方的球）
   function looksLikeBall(el) {
     try {
       if (!el || el.nodeType !== 1) return false;
       if (el === API.handle || el === API.drawer) return false;
       if (API.handle && API.handle.contains(el)) return false;
       if (API.drawer && API.drawer.contains(el)) return false;
-      for (var k in balls) { if (balls[k].el === el) return false; } // 已知的原生球不算 foreign
+      for (var k in balls) { if (balls[k].el === el) return false; }
       var cs = TOP.getComputedStyle(el);
       if (!cs || cs.position !== 'fixed') return false;
       if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') < 0.2) return false;
       var r = el.getBoundingClientRect();
       if (r.width < 20 || r.width > 110 || r.height < 20 || r.height > 110) return false;
-      if (Math.abs(r.width - r.height) > Math.max(r.width, r.height) * 0.7) return false; // 大致方/圆
+      if (Math.abs(r.width - r.height) > Math.max(r.width, r.height) * 0.7) return false;
       var nearEdge = (r.left < 150 || r.right > vw() - 150 || r.top < 150 || r.bottom > vh() - 150);
       if (!nearEdge) return false;
       var z = parseInt(cs.zIndex, 10); if (isNaN(z)) z = 0;
@@ -86,38 +76,30 @@
       return true;
     } catch (e) { return false; }
   }
-
   function scanForeign() {
     var pool = [], seen = new Set(), out = [];
     try { Array.prototype.push.apply(pool, DOC.documentElement.children); } catch (e) {}
     try { if (DOC.body) Array.prototype.push.apply(pool, DOC.body.children); } catch (e) {}
     var deeper = [];
-    pool.forEach(function (el) { try { Array.prototype.push.apply(deeper, el.children); } catch (e) {} }); // 再深一层（有的球包 wrapper）
+    pool.forEach(function (el) { try { Array.prototype.push.apply(deeper, el.children); } catch (e) {} });
     Array.prototype.push.apply(pool, deeper);
-    pool.forEach(function (el) {
-      if (seen.has(el)) return; seen.add(el);
-      if (looksLikeBall(el)) out.push(el);
-    });
+    pool.forEach(function (el) { if (seen.has(el)) return; seen.add(el); if (looksLikeBall(el)) out.push(el); });
     return out;
   }
 
-  // ================= 报到 / 注册 =================
   function registerNative(info) {
     if (!info || !info.id) return;
     var el = info.el || DOC.getElementById(info.id) || null;
     var b = balls[info.id] || {};
-    b.id = info.id;
-    b.type = 'native';
+    b.id = info.id; b.type = 'native';
     b.name = info.name || b.name || info.id;
     b.icon = info.icon || b.icon || (el ? guessIcon(el) : '');
     b.el = el || b.el || null;
     balls[info.id] = b;
-    // 上次会话它是收起的 → 报到就自动收回抽屉
     if (state.docked[b.id]) setDock(b, true, true);
     scheduleRender();
   }
 
-  // ================= 收 / 放 =================
   function setDock(b, docked, silent) {
     if (!b) return;
     var el = b.el || (b.selector ? DOC.querySelector(b.selector) : null) || DOC.getElementById(b.id);
@@ -125,14 +107,14 @@
     if (b.type === 'native') {
       if (el) {
         if (docked) {
-          if (typeof b.prevDisplay !== 'string') b.prevDisplay = el.style.getPropertyValue('display') || ''; // 记住原来的 display，放出时原样还回
+          if (typeof b.prevDisplay !== 'string') b.prevDisplay = el.style.getPropertyValue('display') || '';
           el.setAttribute('data-ycdock', 'docked');
           try { el.dispatchEvent(new CustomEvent('ycdock:cmd', { bubbles: false, detail: { action: 'dock' } })); } catch (e) {}
-          el.style.setProperty('display', 'none', 'important'); // 兜底：球没自己处理也照样藏
+          el.style.setProperty('display', 'none', 'important');
         } else {
           el.removeAttribute('data-ycdock');
-          el.style.removeProperty('display'); // 撤掉我们加的 none
-          if (b.prevDisplay) el.style.display = b.prevDisplay; // 还原原来的 display —— 不碰 left/top，位置交还给球自己（保住球自带的拖动）
+          el.style.removeProperty('display');
+          if (b.prevDisplay) el.style.display = b.prevDisplay;
           b.prevDisplay = undefined;
           try { el.dispatchEvent(new CustomEvent('ycdock:cmd', { bubbles: false, detail: { action: 'free' } })); } catch (e) {}
         }
@@ -142,11 +124,9 @@
     }
     if (docked) state.docked[b.id] = { foreign: b.type === 'foreign', selector: b.selector || '' };
     else delete state.docked[b.id];
-    saveState();
-    if (!silent) scheduleRender();
+    if (!silent) { saveState(); scheduleRender(); }
   }
 
-  // 第三方球：强制藏 + 盯着它的自愈，被 un-hide 就再压一次（用 observer 少闪，定时器兜底）
   function forceHide(b) {
     var el = b.el || (b.selector ? DOC.querySelector(b.selector) : null);
     if (!el) return; b.el = el;
@@ -161,13 +141,10 @@
       b.force.observer = mo; API.observers.push(mo);
     }
     if (!b.force.timer) {
-      b.force.timer = every(1200, function () { // 有的球会整个重建元素，observer 会失联 → 低频重新找+压回
+      b.force.timer = every(1200, function () {
         if (!state.docked[b.id]) return;
         var cur = b.selector ? DOC.querySelector(b.selector) : b.el;
-        if (cur && cur !== b.el) {
-          b.el = cur;
-          if (b.force.observer) { try { b.force.observer.disconnect(); b.force.observer.observe(cur, { attributes: true, attributeFilter: ['style', 'class'] }); } catch (e) {} }
-        }
+        if (cur && cur !== b.el) { b.el = cur; if (b.force.observer) { try { b.force.observer.disconnect(); b.force.observer.observe(cur, { attributes: true, attributeFilter: ['style', 'class'] }); } catch (e) {} } }
         if (cur) { try { var cs = TOP.getComputedStyle(cur); if (cs && cs.display !== 'none') cur.style.setProperty('display', 'none', 'important'); } catch (e) {} }
       });
     }
@@ -182,7 +159,6 @@
     if (el && el.style.display === 'none') el.style.removeProperty('display');
   }
 
-  // 从点击目标往上找到"是球"的那个元素
   function findBallElement(t) {
     if (!t || t.nodeType !== 1) return null;
     if (API.handle && (t === API.handle || API.handle.contains(t))) return null;
@@ -195,54 +171,66 @@
     }
     return null;
   }
-  function collectElement(el) {
-    for (var k in balls) { if (balls[k].el === el && balls[k].type === 'native') { setDock(balls[k], true); return; } }
+  function collectElement(el, silent) {
+    for (var k in balls) { if (balls[k].el === el && balls[k].type === 'native') { setDock(balls[k], true, silent); return; } }
     var key = foreignKey(el);
     var b = balls[key] || { id: key, type: 'foreign', el: el, selector: el.id ? '#' + cssId(el.id) : '', name: (el.id || el.getAttribute('title') || '其他悬浮球'), icon: guessIcon(el) };
     b.el = el; balls[key] = b;
-    setDock(b, true);
+    setDock(b, true, silent);
+  }
+  function collectAll() {
+    for (var k in balls) { var b = balls[k]; if (b.type === 'native' && !state.docked[b.id]) setDock(b, true, true); }
+    scanForeign().forEach(function (el) { collectElement(el, true); });
+    saveState(); render();
   }
 
-  // ================= 界面 =================
   function buildUI() {
-    // 侧边把手
     var h = DOC.createElement('div');
     h.id = 'yc-dock-handle';
     h.title = '悬浮球收纳';
     h.innerHTML = '<span class="ycdk-grip"></span>';
-    // 抽屉
     var d = DOC.createElement('div');
     d.id = 'yc-dock-drawer';
     d.innerHTML =
       '<div class="ycdk-hd"><span>悬浮球收纳</span><button class="ycdk-x" data-x>×</button></div>' +
-      '<div class="ycdk-body">' +
-      '<div class="ycdk-sec" data-sec="docked"><div class="ycdk-sec-t">已收纳</div><div class="ycdk-list" data-list="docked"></div></div>' +
-      '<div class="ycdk-sec" data-sec="free"><div class="ycdk-sec-t">可收纳 <button class="ycdk-rescan" data-rescan>扫描</button></div><div class="ycdk-list" data-list="free"></div></div>' +
-      '</div>' +
-      '<div class="ycdk-tip">长按任意悬浮球也能收起 · 带 ⚠ 的是别人的球，收起可能闪</div>';
-    // 挂在 <html> 上，躲开 body 的 transform（跟芋圆机 v1018 同一个教训）
+      '<div class="ycdk-body"><div class="ycdk-list" data-list="docked"></div></div>' +
+      '<button class="ycdk-all" data-all>一键收起全部</button>' +
+      '<div class="ycdk-tip">把悬浮球拖到把手上＝单独收起</div>';
     DOC.documentElement.appendChild(h);
     DOC.documentElement.appendChild(d);
     API.handle = h; API.drawer = d;
+    if (typeof state.handleTop === 'number') h.style.top = state.handleTop + '%';
 
-    on(h, 'click', function (e) { e.stopPropagation(); toggleDrawer(); });
+    // 把手：拖动＝移动，轻点＝开/收抽屉
+    var hp = { down: false, moved: false, startY: 0, startTop: 42 };
+    on(h, 'pointerdown', function (e) {
+      hp.down = true; hp.moved = false; hp.startY = e.clientY;
+      hp.startTop = (typeof state.handleTop === 'number') ? state.handleTop : 42;
+      try { h.setPointerCapture(e.pointerId); } catch (er) {}
+      e.preventDefault();
+    });
+    on(h, 'pointermove', function (e) {
+      if (!hp.down) return;
+      var dy = e.clientY - hp.startY;
+      if (Math.abs(dy) > 6) hp.moved = true;
+      if (hp.moved) {
+        var pct = hp.startTop + dy / vh() * 100;
+        pct = Math.max(6, Math.min(88, pct));
+        h.style.top = pct + '%'; state.handleTop = pct;
+      }
+    });
+    on(h, 'pointerup', function () {
+      if (!hp.down) return; hp.down = false;
+      if (hp.moved) saveState(); else toggleDrawer();
+    });
+    on(h, 'pointercancel', function () { hp.down = false; });
+
     on(d, 'click', function (e) {
       var t = e.target;
-      if (t.closest('[data-x]')) { e.stopPropagation(); toggleDrawer(false); return; }
-      if (t.closest('[data-rescan]')) { e.stopPropagation(); scheduleRender(); flash(t.closest('[data-rescan]')); return; }
-      var chip = t.closest('.ycdk-chip');
-      if (chip) {
-        e.stopPropagation();
-        var id = chip.getAttribute('data-id');
-        var mode = chip.getAttribute('data-mode');
-        var b = balls[id];
-        if (!b && mode === 'free') { // 来自扫描、还没入库的 foreign
-          var el = foreignCache[id];
-          if (el) collectElement(el);
-        } else if (b) {
-          setDock(b, mode !== 'docked');
-        }
-      }
+      if (t.closest('[data-x]')) { toggleDrawer(false); return; }
+      if (t.closest('[data-all]')) { collectAll(); flash(t.closest('[data-all]')); return; }
+      var out = t.closest('[data-out]'); if (out) { var bo = balls[out.getAttribute('data-out')]; if (bo) setDock(bo, false); return; }
+      var run = t.closest('[data-run]'); if (run) { var br = balls[run.getAttribute('data-run')]; if (br) runByBall(br); return; }
     });
     applyOpen();
   }
@@ -258,90 +246,69 @@
   }
   function flash(el) { if (!el) return; el.classList.add('ycdk-flash'); setTimeout(function () { try { el.classList.remove('ycdk-flash'); } catch (e) {} }, 260); }
 
-  var foreignCache = {}; // 本次渲染发现的、还没入库的第三方球： id -> el
-  function chipHTML(id, name, icon, type, mode) {
-    var ic = icon ? (isImg(icon) ? '<img src="' + esc(icon) + '" alt="">' : '<span class="ycdk-emoji">' + esc(icon) + '</span>') : '<span class="ycdk-letter">' + esc((name || '?').slice(0, 1)) + '</span>';
-    var warn = type === 'foreign' ? ' <span class="ycdk-warn" title="别人的球，收起可能闪">⚠</span>' : '';
-    return '<button class="ycdk-chip" data-id="' + esc(id) + '" data-mode="' + mode + '" data-type="' + type + '">' +
-      '<span class="ycdk-ic">' + ic + '</span>' +
-      '<span class="ycdk-nm">' + esc(name) + warn + '</span>' +
-      '<span class="ycdk-act">' + (mode === 'docked' ? '放出' : '收起') + '</span></button>';
+  // 运行一颗（收着的）球：合成一次原生 tap，让球自己的打开逻辑跑起来，球不放出
+  function runByBall(b) {
+    if (!b) return;
+    var el = b.el || (b.selector ? DOC.querySelector(b.selector) : null) || DOC.getElementById(b.id);
+    if (!el) return;
+    try {
+      var mk = function (type) { return new MouseEvent(type, { bubbles: true, cancelable: true, view: TOP }); };
+      el.dispatchEvent(mk('mousedown')); // 芋圆机 onDown / 汪星 fabBegin
+      el.dispatchEvent(mk('mouseup'));   // 冒泡到 document → 芋圆机 onUp(openXhs) / 汪星 fabEnd
+      el.dispatchEvent(mk('click'));     // 汪星等靠 click 打开的球
+    } catch (e) { try { el.click(); } catch (er) {} }
   }
-
-  var _renderT = null;
-  function scheduleRender() { clearTimeout(_renderT); _renderT = setTimeout(render, 60); }
+  function chipHTML(b) {
+    var icon = b.icon ? (isImg(b.icon) ? '<img src="' + esc(b.icon) + '" alt="">' : '<span class="ycdk-emoji">' + esc(b.icon) + '</span>') : '<span class="ycdk-letter">' + esc((b.name || '?').slice(0, 1)) + '</span>';
+    var warn = b.type === 'foreign' ? ' <span class="ycdk-warn" title="别人的球，收起可能闪">⚠</span>' : '';
+    return '<div class="ycdk-chip">' +
+      '<button class="ycdk-run" data-run="' + esc(b.id) + '"><span class="ycdk-ic">' + icon + '</span><span class="ycdk-nm">' + esc(b.name) + warn + '</span></button>' +
+      '<button class="ycdk-out" data-out="' + esc(b.id) + '" title="放回屏幕">放出</button></div>';
+  }
+  var _rt = null;
+  function scheduleRender() { clearTimeout(_rt); _rt = setTimeout(render, 60); }
   function render() {
     if (!API.drawer || !state.open) return;
-    var dockedList = API.drawer.querySelector('[data-list="docked"]');
-    var freeList = API.drawer.querySelector('[data-list="free"]');
-    if (!dockedList || !freeList) return;
-    var dockedHTML = '', freeHTML = '';
-    // 已收纳
-    for (var id in balls) {
-      var b = balls[id];
-      if (state.docked[b.id]) dockedHTML += chipHTML(b.id, b.name, b.icon, b.type, 'docked');
-    }
-    // 可收纳：已注册但没收起的 native
-    for (var id2 in balls) {
-      var b2 = balls[id2];
-      if (b2.type === 'native' && !state.docked[b2.id]) freeHTML += chipHTML(b2.id, b2.name, b2.icon, 'native', 'free');
-    }
-    // 可收纳：扫描到的 foreign（去掉已经入库/已收起的）
-    foreignCache = {};
-    scanForeign().forEach(function (el) {
-      var key = foreignKey(el);
-      if (state.docked[key] || (balls[key] && state.docked[key])) return;
-      foreignCache[key] = el;
-      freeHTML += chipHTML(key, (el.id || el.getAttribute('title') || '其他悬浮球'), guessIcon(el), 'foreign', 'free');
-    });
-    dockedList.innerHTML = dockedHTML || '<div class="ycdk-empty">还没收起任何球</div>';
-    freeList.innerHTML = freeHTML || '<div class="ycdk-empty">没发现可收的球</div>';
+    var list = API.drawer.querySelector('[data-list="docked"]'); if (!list) return;
+    var html = '';
+    for (var id in balls) { var b = balls[id]; if (state.docked[b.id]) html += chipHTML(b); }
+    list.innerHTML = html || '<div class="ycdk-empty">还没收起任何球</div>';
   }
 
-  // ================= 长按收纳 =================
-  var lp = { timer: null, x: 0, y: 0, fired: false };
-  function bindLongPress() {
+  // 拖球到把手上＝收起（追手指位置，能拖/不能拖的球都收得进）
+  function bindDragCollect() {
+    var db = { el: null, active: false };
     on(DOC, 'pointerdown', function (e) {
+      var ball = findBallElement(e.target);
+      db.el = ball; db.active = !!ball;
+    }, true);
+    on(DOC, 'pointerup', function (e) {
+      if (!db.active || !db.el) { db.active = false; db.el = null; return; }
+      db.active = false;
       try {
-        var ball = findBallElement(e.target);
-        if (!ball) return;
-        lp.x = e.clientX; lp.y = e.clientY; lp.fired = false;
-        clearTimeout(lp.timer);
-        lp.timer = setTimeout(function () {
-          lp.fired = true; lp.timer = null;
-          collectElement(ball);
-          toggleDrawer(true); flash(API.handle);
-        }, 480);
-      } catch (err) {}
+        var r = API.handle.getBoundingClientRect(), pad = 26;
+        var hit = e.clientX >= r.left - pad && e.clientX <= r.right + pad && e.clientY >= r.top - pad && e.clientY <= r.bottom + pad;
+        if (hit) { collectElement(db.el); flash(API.handle); }
+      } catch (er) {}
+      db.el = null;
     }, true);
-    on(DOC, 'pointermove', function (e) {
-      if (!lp.timer) return;
-      if (Math.abs(e.clientX - lp.x) > 10 || Math.abs(e.clientY - lp.y) > 10) { clearTimeout(lp.timer); lp.timer = null; }
-    }, true);
-    var end = function () { clearTimeout(lp.timer); lp.timer = null; };
-    on(DOC, 'pointerup', end, true);
-    on(DOC, 'pointercancel', end, true);
-    // 长按触发后，吞掉紧接着的那次 click（否则会顺手把球/手机点开）
-    on(DOC, 'click', function (e) { if (lp.fired) { lp.fired = false; e.preventDefault(); e.stopPropagation(); } }, true);
+    on(DOC, 'pointercancel', function () { db.active = false; db.el = null; }, true);
   }
 
-  // ================= 握手 =================
   function present() { try { TOP.dispatchEvent(new CustomEvent('ycdock:present')); } catch (e) {} }
   function bindHandshake() {
     on(TOP, 'ycdock:hello', function (e) { registerNative(e.detail || {}); });
-    TOP.__ycDockPresent = true; // 让球即使没监听事件，也能同步查到收纳栏在场
+    TOP.__ycDockPresent = true;
     present();
     [120, 400, 1200, 3000].forEach(function (ms) { setTimeout(present, ms); });
-    every(5000, present); // 便宜的兜底：晚加载的球也能挂上（已注册的会去重）
-    // DOM 有大变动时也吆喝一声 + 重扫（防抖）
+    every(5000, present);
     var moT = null;
-    var mo = new MutationObserver(function () { clearTimeout(moT); moT = setTimeout(function () { present(); if (state.open) scheduleRender(); }, 500); });
+    var mo = new MutationObserver(function () { clearTimeout(moT); moT = setTimeout(present, 500); });
     try { mo.observe(DOC.documentElement, { childList: true, subtree: false }); } catch (e) {}
     try { if (DOC.body) mo.observe(DOC.body, { childList: true, subtree: false }); } catch (e) {}
     API.observers.push(mo);
   }
 
-  // 上次会话收起的第三方球，本次进来重新找回并压住
   function reapplyForeign() {
     for (var id in state.docked) {
       var meta = state.docked[id];
@@ -353,11 +320,8 @@
     }
   }
 
-  // ================= 启动 =================
   function boot() {
-    buildUI();
-    bindLongPress();
-    bindHandshake();
+    buildUI(); bindDragCollect(); bindHandshake();
     [600, 1800].forEach(function (ms) { setTimeout(reapplyForeign, ms); });
     if (state.open) scheduleRender();
   }
