@@ -5,7 +5,7 @@
   }
   var TOP = getTop();
   var DOC = TOP.document;
-  var YCDK_VER = '1.0.9';
+  var YCDK_VER = '1.0.10';
   var YCDK_NAME = '\u828b\u5706\u6536\u7eb3';
 
   function teardown(b) {
@@ -401,7 +401,6 @@
     try {
       // 1) 有布局但看不见
       el.style.setProperty('visibility', 'hidden', 'important');
-      el.style.setProperty('pointer-events', 'none', 'important');
       el.style.removeProperty('display');
       if (b.type === 'native') { if (b.prevDisplay) el.style.display = b.prevDisplay; }
       else if (b.force && b.force.display) { try { el.style.setProperty('display', b.force.display, b.force.priority || ''); } catch (e) {} }
@@ -412,16 +411,23 @@
       var base = { bubbles: true, cancelable: true, view: TOP, clientX: cx, clientY: cy, screenX: cx, screenY: cy, button: 0, buttons: 1 };
       var prevented = false;
       var fire = function (ev) { tgt.dispatchEvent(ev); if (ev.defaultPrevented) prevented = true; };
-      // 3) 真实顺序：pointerdown → touchstart → pointerup → touchend → (未拦截) mousedown → mouseup → click
+      // 3) 触屏：pointer → touch →（touch 没被拦截才补一个 click），不发 mousedown/mouseup
+      //    ——很多球 touch 和 mouse 都听、且"开着再点=关"，两家都发会开了又关（芋圆机就是）
+      //    非触屏：pointer → mouse → click
       var PE = TOP.PointerEvent;
-      var hasTouch = (typeof TOP.Touch === 'function' && typeof TOP.TouchEvent === 'function');
+      var isTouchDev = false; try { isTouchDev = (TOP.navigator && TOP.navigator.maxTouchPoints > 0) || ('ontouchstart' in TOP); } catch (e) {}
       var touch = null;
-      if (hasTouch) { try { touch = new TOP.Touch({ identifier: 1, target: tgt, clientX: cx, clientY: cy, pageX: cx, pageY: cy, screenX: cx, screenY: cy }); } catch (e) { touch = null; } }
-      if (PE) { try { fire(new PE('pointerdown', Object.assign({}, base, { pointerId: 1, pointerType: touch ? 'touch' : 'mouse', isPrimary: true }))); } catch (e) {} }
+      if (isTouchDev && typeof TOP.Touch === 'function' && typeof TOP.TouchEvent === 'function') {
+        try { touch = new TOP.Touch({ identifier: 1, target: tgt, clientX: cx, clientY: cy, pageX: cx, pageY: cy, screenX: cx, screenY: cy }); } catch (e) { touch = null; }
+      }
+      var fireP = function (ev) { try { tgt.dispatchEvent(ev); } catch (e) {} }; // pointer 事件不参与"拦截"判定
+      if (PE) { try { fireP(new PE('pointerdown', Object.assign({}, base, { pointerId: 1, pointerType: touch ? 'touch' : 'mouse', isPrimary: true }))); } catch (e) {} }
       if (touch) { try { fire(new TOP.TouchEvent('touchstart', { bubbles: true, cancelable: true, view: TOP, touches: [touch], targetTouches: [touch], changedTouches: [touch] })); } catch (e) {} }
-      if (PE) { try { fire(new PE('pointerup', Object.assign({}, base, { pointerId: 1, pointerType: touch ? 'touch' : 'mouse', isPrimary: true, buttons: 0 }))); } catch (e) {} }
-      if (touch) { try { fire(new TOP.TouchEvent('touchend', { bubbles: true, cancelable: true, view: TOP, touches: [], targetTouches: [], changedTouches: [touch] })); } catch (e) {} }
-      if (!prevented) {
+      if (PE) { try { fireP(new PE('pointerup', Object.assign({}, base, { pointerId: 1, pointerType: touch ? 'touch' : 'mouse', isPrimary: true, buttons: 0 }))); } catch (e) {} }
+      if (touch) {
+        try { fire(new TOP.TouchEvent('touchend', { bubbles: true, cancelable: true, view: TOP, touches: [], targetTouches: [], changedTouches: [touch] })); } catch (e) {}
+        if (!prevented) { try { tgt.dispatchEvent(new MouseEvent('click', Object.assign({}, base, { buttons: 0 }))); } catch (e) {} }
+      } else {
         try { tgt.dispatchEvent(new MouseEvent('mousedown', base)); } catch (e) {}
         try { tgt.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, base, { buttons: 0 }))); } catch (e) {}
         try { tgt.dispatchEvent(new MouseEvent('click', Object.assign({}, base, { buttons: 0 }))); } catch (e) {}
@@ -432,7 +438,6 @@
       try {
         el.style.setProperty('display', 'none', 'important');
         el.style.removeProperty('visibility');
-        el.style.removeProperty('pointer-events');
       } catch (e) {}
       try { if (obs && state.docked[b.id]) obs.observe(el, { attributes: true, attributeFilter: ['style', 'class'] }); } catch (e) {}
     }, 120);
