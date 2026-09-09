@@ -94,9 +94,6 @@
 
 /* 扩展设置面板 */
 .yc-dock-settings { margin: 6px 0; }
-.yc-dock-settings .ycdk-set-head { display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 6px 4px; font-size: 13px; font-weight: 600; }
-.yc-dock-settings .ycdk-set-caret { opacity: .55; font-size: 11px; }
-.yc-dock-settings .ycdk-set-body { padding: 2px 4px 8px; }
-.yc-dock-settings .ycdk-set-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12.5px; cursor: pointer; }
-.yc-dock-settings .ycdk-set-row input { flex: 0 0 auto; }
 .yc-dock-settings .ycdk-set-note { font-size: 11px; opacity: .6; margin-top: 4px; line-height: 1.5; }
+.yc-dock-settings .ycdk-set-ver { font-size: 11px; opacity: .8; margin-top: 6px; }
+.yc-dock-settings .ycdk-manage { cursor: pointer; text-decoration: underline; opacity: .95; }
