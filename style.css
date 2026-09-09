@@ -5,29 +5,48 @@
   right: 0 !important;
   top: var(--ycdk-top, 50%) !important;
   transform: translateY(-50%) !important;
-  width: 9px !important;
-  height: 56px !important;
-  background: rgba(176, 178, 184, 0.72) !important;
+  width: 44px !important;
+  height: 64px !important;
+  background: transparent !important;
   border: none !important;
-  border-radius: 7px 0 0 7px !important;
-  box-shadow: -1px 1px 6px rgba(120, 120, 130, 0.18) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
   z-index: 2147482000 !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
   cursor: grab !important;
-  transition: right .22s ease, background .18s ease !important;
+  transition: right .22s ease !important;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
   touch-action: none;
 }
 #yc-dock-handle:active { cursor: grabbing !important; }
-#yc-dock-handle .ycdk-grip {
-  width: 2px; height: 20px; border-radius: 2px;
-  background: rgba(255, 255, 255, 0.85);
-  box-shadow: 4px 0 0 -0.5px rgba(255, 255, 255, 0.5);
+#yc-dock-handle::before {
+  content: '';
+  position: absolute;
+  right: 0; top: 4px;
+  width: 32px; height: 56px;
+  border-radius: 32px 0 0 32px;
+  background: rgba(158, 161, 171, 0.72);
+  box-shadow: -2px 2px 8px rgba(90, 95, 110, 0.16);
+  pointer-events: none;
+  transition: background .18s ease;
 }
-#yc-dock-handle.open { right: 118px !important; background: rgba(138, 140, 148, 0.9) !important; }
+#yc-dock-handle:active::before,
+#yc-dock-handle.open::before { background: rgba(128, 133, 146, 0.88); }
+#yc-dock-handle:focus-visible { outline: 2px solid #777e91; outline-offset: -2px; border-radius: 32px 0 0 32px !important; }
+#yc-dock-handle .ycdk-grip {
+  position: absolute;
+  right: 11px; top: 50%; margin-top: -4px;
+  width: 8px; height: 8px;
+  border-right: 2px solid rgba(255, 255, 255, 0.95);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.95);
+  transform: rotate(135deg);
+  pointer-events: none;
+}
+#yc-dock-handle.open { right: 116px !important; }
+#yc-dock-handle.open .ycdk-grip { transform: rotate(-45deg); }
 
 #yc-dock-drawer {
   position: fixed !important;
