@@ -90,10 +90,10 @@
   cursor: pointer; transition: background .15s ease;
 }
 #yc-dock-drawer .ycdk-all:active, #yc-dock-drawer .ycdk-all.ycdk-flash { background: #dcdce0; }
-#yc-dock-drawer .ycdk-tip { font-size: 9.5px; color: #c2c2c6; line-height: 1.4; padding: 2px 9px 9px; text-align: center; }
 
 /* 扩展设置面板 */
-.yc-dock-settings { margin: 6px 0; }
-.yc-dock-settings .ycdk-set-note { font-size: 11px; opacity: .6; margin-top: 4px; line-height: 1.5; }
-.yc-dock-settings .ycdk-set-ver { font-size: 11px; opacity: .8; margin-top: 6px; }
-.yc-dock-settings .ycdk-manage { cursor: pointer; text-decoration: underline; opacity: .95; }
+
+/* 扩展设置面板（id 选择器，保证命中） */
+#yc-dock-settings .ycdk-set-note { font-size: 11px !important; color: #9a9a9f !important; opacity: .85; line-height: 1.5; margin: 2px 0 4px; }
+#yc-dock-settings .ycdk-set-ver { font-size: 11px !important; color: #9a9a9f !important; opacity: .9; margin-top: 4px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+#yc-dock-settings .ycdk-upd-btn { font-size: 11px !important; padding: 2px 9px !important; line-height: 1.4; min-height: 0 !important; }
