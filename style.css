@@ -28,25 +28,22 @@
   right: 0; top: 4px;
   width: 32px; height: 56px;
   border-radius: 32px 0 0 32px;
-  background: rgba(158, 161, 171, 0.72);
-  box-shadow: -2px 2px 8px rgba(90, 95, 110, 0.16);
+  background: rgba(190, 194, 202, 0.38);
+  box-shadow: -2px 2px 8px rgba(90, 95, 110, 0.08);
   pointer-events: none;
   transition: background .18s ease;
 }
-#yc-dock-handle:active::before,
-#yc-dock-handle.open::before { background: rgba(128, 133, 146, 0.88); }
+#yc-dock-handle:active::before { background: rgba(190, 194, 202, 0.52); }
 #yc-dock-handle:focus-visible { outline: 2px solid #777e91; outline-offset: -2px; border-radius: 32px 0 0 32px !important; }
 #yc-dock-handle .ycdk-grip {
   position: absolute;
   right: 11px; top: 50%; margin-top: -4px;
   width: 8px; height: 8px;
-  border-right: 2px solid rgba(255, 255, 255, 0.95);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.95);
+  border-right: 2px solid rgba(134, 141, 155, 0.86);
+  border-bottom: 2px solid rgba(134, 141, 155, 0.86);
   transform: rotate(135deg);
   pointer-events: none;
 }
-#yc-dock-handle.open { right: 116px !important; }
-#yc-dock-handle.open .ycdk-grip { transform: rotate(-45deg); }
 
 #yc-dock-drawer {
   position: fixed !important;
