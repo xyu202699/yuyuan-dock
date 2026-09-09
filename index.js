@@ -5,7 +5,7 @@
   }
   var TOP = getTop();
   var DOC = TOP.document;
-  var YCDK_VER = '1.0.2';
+  var YCDK_VER = '1.0.3';
   var YCDK_NAME = '\u828b\u5706\u6536\u7eb3';
 
   function teardown(b) {
@@ -35,7 +35,7 @@
   function DR() { return ROOT.dock && ROOT.dock.drawer; }
 
   var CFG_KEY = 'yc_dock_cfg';
-  function loadCfg() { try { var c = JSON.parse(TOP.localStorage.getItem(CFG_KEY) || '{}') || {}; return { enabled: c.enabled !== false, hideHandle: !!c.hideHandle }; } catch (e) { return { enabled: true, hideHandle: false }; } }
+  function loadCfg() { try { var c = JSON.parse(TOP.localStorage.getItem(CFG_KEY) || '{}') || {}; return { enabled: c.enabled !== false, hideHandle: c.hideHandle !== false }; } catch (e) { return { enabled: true, hideHandle: true }; } }
   function saveCfg() { try { TOP.localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {} }
   var cfg = loadCfg();
 
@@ -53,13 +53,50 @@
   function isImg(s) { return /^(data:|https?:|\/\/|blob:)/.test(String(s || '')); }
   function vw() { return TOP.innerWidth || 360; }
   function vh() { return TOP.innerHeight || 640; }
-  function isOurs(el) { var h = H(), dr = DR(); return el === h || el === dr || (h && h.contains(el)) || (dr && dr.contains(el)); }
+  function isOurs(el) { var h = H(), dr = DR(), settings = ROOT.settings && ROOT.settings.el; return el === h || el === dr || (h && h.contains(el)) || (dr && dr.contains(el)) || (settings && settings.contains(el)); }
+
+  function svgIcon(svg) {
+    var copy = svg.cloneNode(true);
+    var sources = [svg].concat(Array.prototype.slice.call(svg.querySelectorAll('*')));
+    var copies = [copy].concat(Array.prototype.slice.call(copy.querySelectorAll('*')));
+    var properties = ['color', 'fill', 'fill-opacity', 'fill-rule', 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-linecap', 'stroke-linejoin', 'stroke-dasharray', 'opacity', 'visibility'];
+    sources.forEach(function (source, index) {
+      var target = copies[index], style = TOP.getComputedStyle(source);
+      properties.forEach(function (property) { target.style.setProperty(property, style.getPropertyValue(property)); });
+      Array.prototype.slice.call(target.attributes).forEach(function (attribute) { if (/^on/i.test(attribute.name)) target.removeAttribute(attribute.name); });
+    });
+    Array.prototype.forEach.call(copy.querySelectorAll('script, foreignObject'), function (node) { node.remove(); });
+    copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    if (!copy.hasAttribute('viewBox')) {
+      var rect = svg.getBoundingClientRect();
+      if (rect.width && rect.height) copy.setAttribute('viewBox', '0 0 ' + rect.width + ' ' + rect.height);
+    }
+    copy.setAttribute('width', '26'); copy.setAttribute('height', '26');
+    copy.style.setProperty('width', '26px'); copy.style.setProperty('height', '26px');
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new TOP.XMLSerializer().serializeToString(copy));
+  }
+
+  function fontIcon(el, pseudo) {
+    var style = TOP.getComputedStyle(el, pseudo), content = style.content;
+    if (!content || content === 'none' || content === 'normal') return null;
+    if (!/^(["']).*\1$/.test(content)) return null;
+    var text = content.slice(1, -1).replace(/\\([0-9a-f]{1,6})\s?/gi, function (match, code) { return String.fromCodePoint(parseInt(code, 16)); }).replace(/\\([\\"'])/g, '$1');
+    if (!text.trim() || Array.from(text).length > 2) return null;
+    return { text: text, family: style.fontFamily, weight: style.fontWeight, fontStyle: style.fontStyle, color: style.color };
+  }
 
   function guessIcon(el) {
     try {
-      if (el.tagName === 'IMG' && el.src) return el.src;
-      var im = el.querySelector && el.querySelector('img'); if (im && im.src) return im.src;
-      var bg = TOP.getComputedStyle(el).backgroundImage || ''; var m = bg.match(/url\(["']?(.*?)["']?\)/); if (m && m[1]) return m[1];
+      if (el.tagName === 'IMG' && el.src) return el.currentSrc || el.src;
+      var im = el.querySelector && el.querySelector('img'); if (im && im.src) return im.currentSrc || im.src;
+      var svg = el.localName === 'svg' ? el : el.querySelector('svg'); if (svg) return svgIcon(svg);
+      var nodes = [el].concat(Array.prototype.slice.call(el.querySelectorAll('*')));
+      for (var index = 0; index < nodes.length; index++) {
+        var bg = TOP.getComputedStyle(nodes[index]).backgroundImage || ''; var m = bg.match(/url\(["']?(.*?)["']?\)/); if (m && m[1]) return m[1];
+      }
+      for (var fontIndex = 0; fontIndex < nodes.length; fontIndex++) {
+        var icon = fontIcon(nodes[fontIndex], '::before') || fontIcon(nodes[fontIndex], '::after'); if (icon) return icon;
+      }
       var t = (el.textContent || '').trim(); if (t && t.length <= 2) return t;
     } catch (e) {}
     return '';
@@ -156,10 +193,10 @@
   function forceHide(b) {
     var el = b.el || (b.selector ? DOC.querySelector(b.selector) : null);
     if (!el) return; b.el = el;
-    if (!b.force) b.force = {};
+    if (!b.force) b.force = { display: el.style.getPropertyValue('display'), priority: el.style.getPropertyPriority('display') };
     el.style.setProperty('display', 'none', 'important');
     if (!b.force.observer) {
-      var mo = new MutationObserver(function () { if (!state.docked[b.id]) return; try { if (el.style.display !== 'none') el.style.setProperty('display', 'none', 'important'); } catch (e) {} });
+      var mo = new MutationObserver(function () { if (!state.docked[b.id]) return; try { var current = b.el; if (current && (current.style.display !== 'none' || current.style.getPropertyPriority('display') !== 'important')) current.style.setProperty('display', 'none', 'important'); } catch (e) {} });
       try { mo.observe(el, { attributes: true, attributeFilter: ['style', 'class'] }); } catch (e) {}
       b.force.observer = mo; if (ROOT.dock) ROOT.dock.observers.push(mo);
     }
@@ -167,20 +204,25 @@
       b.force.timer = every(ROOT.dock, 2500, function () {
         if (!state.docked[b.id]) return;
         var cur = b.selector ? DOC.querySelector(b.selector) : b.el;
-        if (cur && cur !== b.el) { b.el = cur; if (b.force.observer) { try { b.force.observer.disconnect(); b.force.observer.observe(cur, { attributes: true, attributeFilter: ['style', 'class'] }); } catch (e) {} } }
+        if (cur && cur !== b.el) { b.el = cur; b.force.display = cur.style.getPropertyValue('display'); b.force.priority = cur.style.getPropertyPriority('display'); if (b.force.observer) { try { b.force.observer.disconnect(); b.force.observer.observe(cur, { attributes: true, attributeFilter: ['style', 'class'] }); } catch (e) {} } }
         if (cur && cur.style.display !== 'none') cur.style.setProperty('display', 'none', 'important');
       });
     }
   }
   function forceShow(b) {
+    var previous = b.force;
     if (b.force) { try { b.force.observer && b.force.observer.disconnect(); } catch (e) {} try { b.force.timer && clearInterval(b.force.timer); } catch (e) {} b.force = null; }
     var el = b.el || (b.selector ? DOC.querySelector(b.selector) : null);
-    if (el && el.style.display === 'none') el.style.removeProperty('display');
+    if (el && el.style.display === 'none') {
+      if (previous && previous.display) el.style.setProperty('display', previous.display, previous.priority);
+      else el.style.removeProperty('display');
+    }
   }
 
   function findBallElement(t) {
     if (!t || t.nodeType !== 1) return null;
     if (isOurs(t)) return null;
+    for (var id in balls) { var known = balls[id].el; if (known && known.contains(t)) return known; }
     var el = t, depth = 0;
     while (el && el.nodeType === 1 && depth < 12) {
       for (var k in balls) { if (balls[k].el === el) return el; }
@@ -190,14 +232,14 @@
     return null;
   }
   function collectElement(el, silent) {
-    for (var k in balls) { if (balls[k].el === el && balls[k].type === 'native') { setDock(balls[k], true, silent); return; } }
+    for (var k in balls) { if (balls[k].el === el) { setDock(balls[k], true, silent); return; } }
     var key = foreignKey(el);
     var b = balls[key] || { id: key, type: 'foreign', el: el, selector: el.id ? '#' + cssId(el.id) : '', name: (el.id || el.getAttribute('title') || '\u5176\u4ed6\u60ac\u6d6e\u7403'), icon: guessIcon(el) };
     b.el = el; balls[key] = b;
     setDock(b, true, silent);
   }
   function collectAll() {
-    for (var k in balls) { var b = balls[k]; if (b.type === 'native' && !state.docked[b.id]) setDock(b, true, true); }
+    for (var k in balls) { var b = balls[k]; if (!state.docked[b.id]) setDock(b, true, true); }
     scanForeign().forEach(function (el) { collectElement(el, true); });
     saveState(); render();
   }
@@ -212,7 +254,7 @@
   }
 
   function chipHTML(b) {
-    var icon = b.icon ? (isImg(b.icon) ? '<img src="' + esc(b.icon) + '" alt="">' : '<span class="ycdk-emoji">' + esc(b.icon) + '</span>') : '<span class="ycdk-letter">' + esc((b.name || '?').slice(0, 1)) + '</span>';
+    var icon = b.icon ? (typeof b.icon === 'object' ? '<span class="ycdk-font-icon"></span>' : (isImg(b.icon) ? '<img src="' + esc(b.icon) + '" alt="">' : '<span class="ycdk-emoji">' + esc(b.icon) + '</span>')) : '<span class="ycdk-letter">' + esc((b.name || '?').slice(0, 1)) + '</span>';
     var warn = b.type === 'foreign' ? ' <span class="ycdk-warn" title="\u522b\u4eba\u7684\u7403\uff0c\u6536\u8d77\u53ef\u80fd\u95ea">\u26a0</span>' : '';
     return '<div class="ycdk-chip">' +
       '<button class="ycdk-run" data-run="' + esc(b.id) + '"><span class="ycdk-ic">' + icon + '</span><span class="ycdk-nm">' + esc(b.name) + warn + '</span></button>' +
@@ -226,6 +268,14 @@
     var html = '';
     for (var id in balls) { var b = balls[id]; if (state.docked[b.id]) html += chipHTML(b); }
     list.innerHTML = html || '<div class="ycdk-empty">\u8fd8\u6ca1\u6536\u8d77\u4efb\u4f55\u7403</div>';
+    Array.prototype.forEach.call(list.querySelectorAll('.ycdk-font-icon'), function (node) {
+      var ball = balls[node.closest('[data-run]').getAttribute('data-run')], icon = ball.icon;
+      node.textContent = icon.text;
+      node.style.setProperty('font-family', icon.family, 'important');
+      node.style.setProperty('font-weight', icon.weight, 'important');
+      node.style.setProperty('font-style', icon.fontStyle, 'important');
+      node.style.setProperty('color', icon.color, 'important');
+    });
   }
   function flash(el) { if (!el) return; el.classList.add('ycdk-flash'); setTimeout(function () { try { el.classList.remove('ycdk-flash'); } catch (e) {} }, 260); }
   function toggleDrawer(force) { state.open = (typeof force === 'boolean') ? force : !state.open; saveState(); applyOpen(); if (state.open) scheduleRender(); }
@@ -260,21 +310,56 @@
       var run = t.closest('[data-run]'); if (run) { var br = balls[run.getAttribute('data-run')]; if (br) runByBall(br); return; }
     });
 
-    // 拖球到把手上＝收起。按下只记目标（零开销），松手落在把手上才去判断是不是球——不拖慢日常点击
-    var db = { target: null, active: false };
-    on(D, DOC, 'pointerdown', function (e) { db.target = e.target; db.active = true; }, true);
-    on(D, DOC, 'pointerup', function (e) {
-      if (!db.active) return; db.active = false;
-      var tgt = db.target; db.target = null;
-      if (!tgt) return;
+    var pointerDrag = null, touchDrag = null, lastDrop = null;
+    function startDrag(target, point, id) {
+      var ball = findBallElement(target);
+      return ball ? { ball: ball, id: id, x: point.clientX, y: point.clientY } : null;
+    }
+    function finishDrag(drag, point) {
+      if (!drag || Math.hypot(point.clientX - drag.x, point.clientY - drag.y) < 6) return;
       try {
-        var r = h.getBoundingClientRect(); if (!(r.width > 0)) return;
-        var pad = 30;
-        if (!(e.clientX >= r.left - pad && e.clientX <= r.right + pad && e.clientY >= r.top - pad && e.clientY <= r.bottom + pad)) return;
-        var ball = findBallElement(tgt); if (ball) { collectElement(ball); flash(h); }
+        var target = cfg.hideHandle ? (state.open ? d : null) : h;
+        if (!target) return;
+        var rect = target.getBoundingClientRect(), pad = 30;
+        if (!(rect.width > 0 && rect.height > 0)) return;
+        if (!(point.clientX >= rect.left - pad && point.clientX <= rect.right + pad && point.clientY >= rect.top - pad && point.clientY <= rect.bottom + pad)) return;
+        collectElement(drag.ball); flash(target);
+        lastDrop = { ball: drag.ball, time: Date.now() };
       } catch (er) {}
+    }
+    on(D, DOC, 'pointerdown', function (e) {
+      if (e.pointerType === 'touch') return;
+      pointerDrag = e.isPrimary !== false && e.button === 0 ? startDrag(e.target, e, e.pointerId) : null;
     }, true);
-    on(D, DOC, 'pointercancel', function () { db.active = false; db.target = null; }, true);
+    on(D, DOC, 'pointerup', function (e) {
+      if (!pointerDrag || pointerDrag.id !== e.pointerId) return;
+      var drag = pointerDrag; pointerDrag = null; finishDrag(drag, e);
+    }, true);
+    on(D, DOC, 'pointercancel', function (e) {
+      if (pointerDrag && pointerDrag.id === e.pointerId) pointerDrag = null;
+    }, true);
+    on(D, DOC, 'touchstart', function (e) {
+      touchDrag = e.touches.length === 1 ? startDrag(e.target, e.touches[0], e.touches[0].identifier) : null;
+    }, { capture: true, passive: true });
+    function trackedTouch(touches) {
+      if (!touchDrag) return null;
+      for (var index = 0; index < touches.length; index++) { if (touches[index].identifier === touchDrag.id) return touches[index]; }
+      return null;
+    }
+    on(D, DOC, 'touchmove', function (e) {
+      var touch = trackedTouch(e.touches);
+      if (touch && e.cancelable && Math.hypot(touch.clientX - touchDrag.x, touch.clientY - touchDrag.y) >= 6) e.preventDefault();
+    }, { capture: true, passive: false });
+    on(D, DOC, 'touchend', function (e) {
+      var touch = trackedTouch(e.changedTouches);
+      if (!touch) return;
+      var drag = touchDrag; touchDrag = null; finishDrag(drag, touch);
+    }, { capture: true, passive: true });
+    on(D, DOC, 'touchcancel', function () { touchDrag = null; }, { capture: true, passive: true });
+    on(D, TOP, 'blur', function () { pointerDrag = null; touchDrag = null; });
+    on(D, DOC, 'click', function (e) {
+      if (lastDrop && Date.now() - lastDrop.time < 500 && lastDrop.ball.contains(e.target)) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
 
     on(D, TOP, 'ycdock:hello', function (e) { registerNative(e.detail || {}); });
     TOP.__ycDockPresent = true;
