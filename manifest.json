@@ -1,12 +1,12 @@
 {
-  "display_name": "芋圆收纳by小芋",
+  "display_name": "芋圆收纳",
   "loading_order": 100,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "css": "style.css",
   "author": "小芋",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "homePage": "",
   "auto_update": false
 }
