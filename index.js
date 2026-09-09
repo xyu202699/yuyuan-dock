@@ -5,7 +5,7 @@
   }
   var TOP = getTop();
   var DOC = TOP.document;
-  var YCDK_VER = '1.0.6';
+  var YCDK_VER = '1.0.7';
   var YCDK_NAME = '\u828b\u5706\u6536\u7eb3';
 
   function teardown(b) {
@@ -369,8 +369,8 @@
   }
   function flash(el) { if (!el) return; el.classList.add('ycdk-flash'); setTimeout(function () { try { el.classList.remove('ycdk-flash'); } catch (e) {} }, 260); }
   function toggleDrawer(force) { state.open = (typeof force === 'boolean') ? force : !state.open; saveState(); applyOpen(); if (state.open) scheduleRender(); }
-  function applyOpen() { var h = H(), dr = DR(); if (!h || !dr) return; dr.classList.toggle('open', !!state.open); h.classList.toggle('open', !!state.open); h.setAttribute('aria-expanded', String(state.open)); applyDockPosition(); }
-  function applyHideHandle() { var h = H(); if (h) h.style.setProperty('display', cfg.hideHandle ? 'none' : 'flex', 'important'); }
+  function applyOpen() { var h = H(), dr = DR(); if (!h || !dr) return; dr.classList.toggle('open', !!state.open); h.classList.toggle('open', !!state.open); h.setAttribute('aria-expanded', String(state.open)); applyHideHandle(); applyDockPosition(); }
+  function applyHideHandle() { var h = H(); if (h) h.style.setProperty('display', cfg.hideHandle || state.open ? 'none' : 'flex', 'important'); }
   function applyDockPosition(center) {
     var handle = H(), drawer = DR();
     if (!handle || !drawer) return;
@@ -387,7 +387,7 @@
   function buildDock() {
     if (ROOT.dock) return;
     var D = ROOT.dock = mkBucket();
-    var h = DOC.createElement('div'); h.id = 'yc-dock-handle'; h.title = '点击展开或收起，按住上下拖动'; h.innerHTML = '<span class="ycdk-grip" aria-hidden="true"></span>';
+    var h = DOC.createElement('div'); h.id = 'yc-dock-handle'; h.title = '点击展开，按住上下拖动'; h.innerHTML = '<span class="ycdk-grip" aria-hidden="true"></span>';
     h.setAttribute('role', 'button'); h.tabIndex = 0;
     h.setAttribute('aria-label', '悬浮球收纳'); h.setAttribute('aria-controls', 'yc-dock-drawer');
     var d = DOC.createElement('div'); d.id = 'yc-dock-drawer';
@@ -448,7 +448,7 @@
       if (!drag || Math.hypot(point.clientX - drag.x, point.clientY - drag.y) < 6) return;
       try {
         var targets = state.open ? [d] : [];
-        if (!cfg.hideHandle) targets.push(h);
+        if (!cfg.hideHandle && !state.open) targets.push(h);
         var current = drag.ball.getBoundingClientRect(), initial = drag.rect;
         var moved = current.width > 0 && current.height > 0 && Math.hypot(current.left - initial.left, current.top - initial.top) > 2;
         var left = moved ? current.left : initial.left + point.clientX - drag.x;
